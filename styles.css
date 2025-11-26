@@ -1,0 +1,210 @@
+/* Reset básico */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  line-height: 1.6;
+  color: #fff;
+  background-color: #221e2f;
+}
+
+.container {
+  width: 90%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Header */
+.header {
+  background-color: #1b1830;
+  padding: 1rem 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+}
+
+.header .logo img {
+  max-width: 150px;
+}
+
+.header nav ul {
+  list-style: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 1.5rem;
+}
+
+.header nav ul li a {
+  color: #9e7dfd;
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+.header nav ul li a:hover {
+  color: #d1bfff;
+}
+
+/* Hero Section */
+.hero {
+  text-align: center;
+  padding: 4rem 1rem;
+  background-color: #2d2942;
+}
+
+.hero h1 {
+  font-size: 2.5rem;
+  color: #d1bfff;
+}
+
+.hero p {
+  font-size: 1.2rem;
+  color: #ccc;
+  margin-top: 1rem;
+}
+
+/* About Section */
+.about {
+  padding: 4rem 1rem;
+  background-color: #221e2f;
+}
+
+.about h2 {
+  text-align: center;
+  color: #c3b9ff;
+  margin-bottom: 1rem;
+}
+
+.about p {
+  text-align: center;
+  color: #ddd;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Features Section */
+.features {
+  padding: 4rem 1rem;
+  background-color: #2d2942;
+}
+
+.features h2 {
+  text-align: center;
+  color: #c3b9ff;
+  margin-bottom: 2rem;
+}
+
+.feature-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  justify-content: center;
+}
+
+.feature-item {
+  background-color: #1b1830;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  flex: 1 1 300px;
+}
+
+.feature-item h3 {
+  color: #b9a3ff;
+  margin-bottom: 1rem;
+}
+
+.feature-item p {
+  color: #ccc;
+}
+
+/* Why Choose Section */
+.why-choose {
+  padding: 4rem 1rem;
+  background-color: #221e2f;
+}
+
+.why-choose h2 {
+  text-align: center;
+  color: #c3b9ff;
+  margin-bottom: 1rem;
+}
+
+.why-choose ul {
+  list-style: none;
+  text-align: center;
+  color: #ddd;
+}
+
+.why-choose ul li {
+  margin-bottom: 0.5rem;
+}
+
+/* Contact Section */
+.contact {
+  padding: 4rem 1rem;
+  background-color: #2d2942;
+}
+
+.contact h2 {
+  text-align: center;
+  color: #c3b9ff;
+  margin-bottom: 1rem;
+}
+
+.contact p {
+  text-align: center;
+  color: #ddd;
+  margin-bottom: 2rem;
+}
+
+.contact form {
+  max-width: 600px;
+  margin: 0 auto;
+  background-color: #1b1830;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.contact form label {
+  display: block;
+  color: #b9a3ff;
+  margin-bottom: 0.5rem;
+}
+
+.contact form input,
+.contact form textarea {
+  width: 100%;
+  padding: 0.8rem;
+  margin-bottom: 1.5rem;
+  border: none;
+  border-radius: 4px;
+  background-color: #2d2942;
+  color: #fff;
+}
+
+.contact form button {
+  background-color: #9e7dfd;
+  color: #221e2f;
+  padding: 0.8rem 2rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.contact form button:hover {
+  background-color: #b9a3ff;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding: 1rem;
+  background-color: #1b1830;
+  color: #777;
+}

@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permitir acesso total para funções do Firebase Admin
+    // As funções autenticadas com Firebase Admin podem acessar todos os documentos
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Regras específicas para a coleção Orders
+    match /Orders/{orderId} {
+      // Permitir leitura e escrita para usuários autenticados
+      allow read, write: if request.auth != null;
+      
+      // Permitir acesso administrativo (Firebase Admin functions)
+      allow read, write: if true; // Firebase Admin bypassa essas regras de qualquer forma
+    }
+    
+    // Regras para outras coleções importantes
+    match /Stores/{storeId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /Users/{userId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /Conversations/{conversationId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Permitir acesso a todas as outras coleções para usuários autenticados
+    match /{collection}/{document} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

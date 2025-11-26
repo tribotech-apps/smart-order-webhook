@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "582965588976",
+    "project_id": "talkcommerce-2c6e6",
+    "storage_bucket": "talkcommerce-2c6e6.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:582965588976:android:9500ca2115dec8c25aa335",
+        "android_client_info": {
+          "package_name": "com.tribotechapps.smartorder"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "582965588976-rtckd83s3ketf7q5obv1jpemajqn6khi.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2t-gMg8y9PgbL3n4f7xV-YAbO-n_ao1s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "582965588976-rtckd83s3ketf7q5obv1jpemajqn6khi.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "582965588976-am28kg1rv1msgu6bhrko9oscen5e9rrs.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tribotechapps.smartorder"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,28 @@
+{
+  "textPayload": "VAI ENVIAR PARA O IA [\n  {\n    role: 'system',\n    content: '\\n' +\n      '    Você é um assistente que interpreta pedidos de delivery.\\n' +\n      '\\n' +\n      '    Você deve analisar o texto do cliente e tentar identificar os produtos e opcionais.\\n' +\n      '    Use o cardápio e as regras abaixo para decidir o que já foi informado e o que falta perguntar.\\n' +\n      '\\n' +\n      '    Se um produto tiver opcionais obrigatórios (isRequired=true), pergunte pelas opções faltantes.\\n' +\n      '    Se minRequired e maxRequired forem diferentes, respeite os limites mínimos e máximos de respostas.\\n' +\n      '\\n' +\n      '    Retorne um JSON no formato:\\n' +\n      '    {\\n' +\n      '      \"itens\": [\\n' +\n      '        {\\n' +\n      '          \"produto\": \"Nome do produto\",\\n' +\n      '          \"quantidade\": 1,\\n' +\n      '          \"opcionais\": [\\n' +\n      '            {\"pergunta\": \"Nome da pergunta\", \"respostas\": [\"...\"]}\\n' +\n      '          ],\\n' +\n      '          \"status\": \"completo\" | \"incompleto\"\\n' +\n      '        }\\n' +\n      '      ],\\n' +\n      '      \"mensagemAoCliente\": \"Texto de resposta que o bot deve enviar\"\\n' +\n      '    }\\n' +\n      '  '\n  },\n  {\n    role: 'user',\n    content: 'CARDÁPIO: {\"categorias\":[{\"name\":\"Marmitex\",\"id\":3},{\"name\":\"Sobremesas\",\"id\":4},{\"name\":\"Bebidas\",\"id\":5}],\"produtos\":[{\"name\":\"Marmitex Pequeno \",\"price\":19.9,\"optionals\":[{\"name\":\"Escolha uma carne \",\"required\":true,\"answers\":[{\"name\":\"Pernil\",\"price\":0},{\"name\":\"Bife Acebolado \",\"price\":0},{\"name\":\"Filé à Parmegiana \",\"price\":5.9},{\"name\":\"Calabresa\",\"price\":0}]}]},{\"name\":\"Marmitex Médio\",\"price\":25.9,\"optionals\":[{\"name\":\"Escolha duas carnes\",\"required\":true,\"answers\":[{\"name\":\"Filé de Frango \",\"price\":0},{\"name\":\"Pernil\",\"price\":0},{\"name\":\"Bife Acebolado \",\"price\":0},{\"name\":\"Filé à Parmegiana \",\"price\":5.9}]}]},{\"name\":\"Marmitex Grande \",\"price\":39.9,\"optionals\":[{\"name\":\"Escolha 3 carnes\",\"required\":true,\"answers\":[{\"name\":\"Pernil\",\"price\":0},{\"name\":\"Filé de Frango\",\"price\":0},{\"name\":\"Bife Acebolado\",\"price\":0},{\"name\":\"Filé a Parmegiana \",\"price\":5.9}]}]},{\"name\":\"Sorvete\",\"price\":16,\"optionals\":[]},{\"name\":\"Coca Cola Lata\",\"price\":6.9,\"optionals\":[]},{\"name\":\"Guaraná Lata\",\"price\":5.9,\"optionals\":[]},{\"name\":\"Bolo Aniversário\",\"price\":32.4,\"optionals\":[{\"name\":\"Escolha um sabor\",\"required\":true,\"answers\":[{\"name\":\"Chocolate\",\"price\":0},{\"name\":\"Morango\",\"price\":0},{\"name\":\"Napolitano\",\"price\":3.5}]}]}]}\\n' +\n      '\\n' +\n      'MENSAGEM: [object Object]'\n  }\n]",
+  "insertId": "69121747000a7a42e015a36a",
+  "resource": {
+    "type": "cloud_run_revision",
+    "labels": {
+      "location": "us-central1",
+      "project_id": "talkcommerce-2c6e6",
+      "revision_name": "talkcommercewhatsappwebhook-00955-gic",
+      "service_name": "talkcommercewhatsappwebhook",
+      "configuration_name": "talkcommercewhatsappwebhook"
+    }
+  },
+  "timestamp": "2025-11-10T16:48:07.686658Z",
+  "severity": "INFO",
+  "labels": {
+    "run.googleapis.com/base_image_versions": "us-docker.pkg.dev/serverless-runtimes/google-22-full/runtimes/nodejs22:nodejs22_20251102_22_20_0_RC00",
+    "firebase-functions-hash": "efe408c0f4b566636244084d6344554a23babff3",
+    "goog-drz-cloudfunctions-id": "talkcommercewhatsappwebhook",
+    "instanceId": "00147782965a9c6d031d714b9b05b31d32223e2d77cae615dd158764f477bf250f2bb55bf6689027b367495f69e728134520416d39fe93765af5c8ad30ee7faec3ee33bf9cf0a74e9bedb939d9467c",
+    "execution_id": "tdltmap8hww3",
+    "goog-managed-by": "cloudfunctions",
+    "goog-drz-cloudfunctions-location": "us-central1"
+  },
+  "logName": "projects/talkcommerce-2c6e6/logs/run.googleapis.com%2Fstdout",
+  "receiveTimestamp": "2025-11-10T16:48:07.791643943Z",
+  "spanId": "1315510738391487486"
+}
