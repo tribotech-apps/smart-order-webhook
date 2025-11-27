@@ -7,13 +7,10 @@ import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors';
 import {
   createConversation,
-  deleteConversation,
-  getConversationByDocId,
-  getConversationByFlowToken,
   getRecentConversation,
   updateConversation
 } from '../../controllers/conversationController';
-import { Conversation, ConversationFlow } from '../../types/Conversation';
+import { Conversation } from '../../types/Conversation';
 require("firebase-functions/logger/compat");
 import { notifyAdmin, sendContactMessage, sendMessage, sendWelcomeMessage } from '../../services/messagingService';
 import { notificationService } from '../../services/notificationService';

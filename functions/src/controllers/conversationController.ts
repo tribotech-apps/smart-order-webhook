@@ -105,8 +105,6 @@ export const getConversationByFlowToken = async (flowToken: string): Promise<Con
   return null;
 };
 
-
-
 export const createConversation = async (conversation: Conversation): Promise<string> => {
   const db = getFirestore();
   const conversationsRef = collection(db, 'Conversations'); // Substitua 'conversations' pelo nome da sua coleção

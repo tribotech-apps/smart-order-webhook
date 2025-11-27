@@ -113,4 +113,68 @@ router.post('/sendOrderDelivered', async (req, res) => {
         res.status(500).send({ error: error.message });
     }
 });
+router.post('/send-whatsapp-message', async (req, res) => {
+    try {
+        const { phoneNumbers, message, wabaEnvironments, formatType = 'text' } = req.body;
+        if (!phoneNumbers || !message || !wabaEnvironments) {
+            res.status(400).json({
+                error: 'phoneNumbers, message and wabaEnvironments are required'
+            });
+            return;
+        }
+        if (!Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
+            res.status(400).json({
+                error: 'phoneNumbers must be a non-empty array'
+            });
+            return;
+        }
+        const results = [];
+        for (const phoneNumber of phoneNumbers) {
+            try {
+                let formattedMessage = message;
+                if (formatType === 'order-status') {
+                    const { orderId, currentStage, storeName } = req.body;
+                    formattedMessage = `🛍️ *${storeName || 'Loja'}*\n\n` +
+                        `Seu pedido #${orderId || 'XXX'} foi atualizado!\n\n` +
+                        `📋 Status atual: *${currentStage || message}*\n\n` +
+                        `Obrigado pela sua confiança! 😊`;
+                }
+                const messagePayload = {
+                    messaging_product: 'whatsapp',
+                    to: phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`,
+                    type: 'text',
+                    text: {
+                        body: formattedMessage
+                    }
+                };
+                await (0, messagingService_js_1.sendMessage)(messagePayload, wabaEnvironments);
+                results.push({
+                    phoneNumber,
+                    status: 'success',
+                    message: 'Message sent successfully'
+                });
+                await (0, messagingService_js_1.delay)(500);
+            }
+            catch (error) {
+                console.error(`Error sending message to ${phoneNumber}:`, error);
+                results.push({
+                    phoneNumber,
+                    status: 'error',
+                    error: error.message
+                });
+            }
+        }
+        res.json({
+            success: true,
+            results
+        });
+    }
+    catch (error) {
+        console.error('Error in send-whatsapp-message:', error);
+        res.status(500).json({
+            error: 'Internal server error',
+            details: error.message
+        });
+    }
+});
 exports.default = router;
