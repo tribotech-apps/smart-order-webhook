@@ -1512,7 +1512,7 @@ router.post('/webhook', async (req, res) => {
                 const value = change.value;
                 if (value.messages) {
                     const message = value.messages[0];
-                    console.log('Mensagem recebida', message);
+                    console.log('Mensagem recebida', value, message);
                     const from = message.from; // Número de telefone do remetente
                     const type = message.type; // Tipo da mensagem
                     const activeOrder = await (0, ordersController_1.getActiveOrder)(from, store._id);
@@ -1551,6 +1551,15 @@ router.post('/webhook', async (req, res) => {
                                     }
                                 }
                             };
+                            // Adicionar header com logo da loja se disponível
+                            if (store.logo) {
+                                messagePayload.interactive.header = {
+                                    type: 'image',
+                                    image: {
+                                        link: store.logo
+                                    }
+                                };
+                            }
                             if (!store?.wabaEnvironments)
                                 return;
                             await ((0, messagingService_1.sendMessage)(messagePayload, store.wabaEnvironments));
@@ -1567,7 +1576,7 @@ router.post('/webhook', async (req, res) => {
                                 selectedAnswers: [],
                                 deliveryPrice: store.deliveryPrice,
                                 flowToken,
-                                customerName: userFrom?.name || '',
+                                customerName,
                                 store,
                                 message
                             };
@@ -1606,6 +1615,15 @@ router.post('/webhook', async (req, res) => {
                                     }
                                 }
                             };
+                            // Adicionar header com logo da loja se disponível
+                            if (store.logo) {
+                                messagePayload.interactive.header = {
+                                    type: 'image',
+                                    image: {
+                                        link: store.logo
+                                    }
+                                };
+                            }
                             if (!store?.wabaEnvironments)
                                 return;
                             await ((0, messagingService_1.sendMessage)(messagePayload, store.wabaEnvironments));
@@ -1642,7 +1660,78 @@ router.post('/webhook', async (req, res) => {
                             }
                             await (0, incomingMessageService_1.handleIncomingTextMessage)(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
                         }
-                        else {
+                        else if (message.interactive?.type === 'button_reply' &&
+                            (message.interactive?.button_reply?.id === 'delivery' || message.interactive?.button_reply?.id === 'counter')) {
+                            const deliveryChoice = message.interactive.button_reply.id;
+                            let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
+                            const userFrom = await (0, userController_1.getUserByPhone)(from);
+                            console.log(`----BOTÃO ${deliveryChoice.toUpperCase()} CLICADO-----`);
+                            if (!currentConversation || currentConversation.flow !== 'DELIVERY_TYPE') {
+                                console.log('ERRO: Conversa não encontrada ou flow incorreto para delivery choice');
+                                return;
+                            }
+                            if (deliveryChoice === 'counter') {
+                                // Cliente escolheu retirada no balcão
+                                console.log('----cliente ESCOLHEU RETIRADA NO BALCÃO-----');
+                                await (0, conversationController_1.updateConversation)(currentConversation, {
+                                    deliveryOption: 'counter',
+                                    flow: 'CATEGORIES'
+                                });
+                                // Chama o IA com mensagem "cardápio" para iniciar o pedido
+                                console.log('Chamando IA com mensagem "cardápio" para iniciar pedido - RETIRADA');
+                                const cardapioMessage = { text: { body: 'cardápio' } };
+                                const intent = await (0, incomingMessageService_1.classifyUserMessage)(cardapioMessage, store, currentConversation.history || '');
+                                const content = (0, incomingMessageService_1.parseAIResponse)(intent.message?.content);
+                                console.log('Resposta da IA para cardápio (retirada):', content);
+                                // Atualizar histórico com a resposta da IA
+                                await (0, conversationController_1.updateConversation)(currentConversation, {
+                                    deliveryOption: 'counter', // Garantir que mantém como retirada
+                                    flow: 'CATEGORIES',
+                                    history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} ${content.message}`
+                                });
+                                // Enviar resposta da IA para o cliente
+                                if (store.wabaEnvironments) {
+                                    await (0, messagingService_1.sendMessage)({
+                                        messaging_product: 'whatsapp',
+                                        to: "+" + from,
+                                        type: 'text',
+                                        text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${content.message}` }
+                                    }, store.wabaEnvironments);
+                                }
+                            }
+                            else if (deliveryChoice === 'delivery') {
+                                // Cliente escolheu delivery
+                                console.log('----cliente ESCOLHEU DELIVERY-----');
+                                await (0, conversationController_1.updateConversation)(currentConversation, {
+                                    deliveryOption: 'delivery',
+                                    flow: 'CHECK_ADDRESS'
+                                });
+                                // Agora verifica se tem endereço cadastrado
+                                if (userFrom?.address) {
+                                    console.log('----cliente TEM ENDERECO-----');
+                                    if (store.wabaEnvironments) {
+                                        await (0, messagingService_1.sendMessage)({
+                                            messaging_product: 'whatsapp',
+                                            to: "+" + from,
+                                            type: 'text',
+                                            text: { body: `✅ Endereço encontrado!\n\n📍 **${userFrom.address.name}**\n\nVocê confirma este endereço ou deseja informar outro?` },
+                                        }, store.wabaEnvironments);
+                                    }
+                                    await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'ADDRESS_CONFIRMATION' });
+                                }
+                                else {
+                                    console.log('----cliente NAO TEM ENDERECO, PEDE PARA INFORMAR-----');
+                                    if (store.wabaEnvironments) {
+                                        await (0, messagingService_1.sendMessage)({
+                                            messaging_product: 'whatsapp',
+                                            to: "+" + from,
+                                            type: 'text',
+                                            text: { body: `✅ Por favor, informe seu endereço completo` },
+                                        }, store.wabaEnvironments);
+                                    }
+                                    await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
+                                }
+                            }
                         }
                     }
                 }

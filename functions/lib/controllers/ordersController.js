@@ -72,11 +72,11 @@ const createOrder = async (conversation, paymentId) => {
         const order = {
             id: `${store?.slug}-${(new Date().getUTCMilliseconds() + Math.floor(Math.random() * 100000)).toFixed(0).toString()}`,
             uid: userUid,
-            deliveryOption: 'DELIVERY',
+            deliveryOption: conversation.deliveryOption === 'counter' ? 'COUNTER' : 'DELIVERY',
             address: conversation.address,
             currentFlow: { hour: firestore_1.Timestamp.now(), flowId: Order_1.OrderFlow.QUEUE },
             customerName: conversation.customerName,
-            deliveryPrice: conversation.deliveryPrice || 0,
+            deliveryPrice: conversation.deliveryOption === 'counter' ? 0 : (conversation.deliveryPrice || 0),
             createdAt: firestore_1.Timestamp.now(),
             items: conversation.cartItems?.map((item, index) => ({
                 id: index ? index + 1 : 1,

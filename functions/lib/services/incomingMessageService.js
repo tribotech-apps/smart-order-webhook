@@ -3,9 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseAIResponse = parseAIResponse;
 exports.handleIncomingTextMessage = handleIncomingTextMessage;
 exports.classifyUserMessage = classifyUserMessage;
 exports.classifyPaymentType = classifyPaymentType;
+exports.interpretDeliveryChoice = interpretDeliveryChoice;
 exports.interpretAddressConfirmation = interpretAddressConfirmation;
 const ordersController_1 = require("../controllers/ordersController");
 const conversationController_1 = require("../controllers/conversationController");
@@ -178,7 +180,7 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                 to: "+" + from,
                 type: 'text',
                 text: {
-                    body: 'A loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00. Se quiser, digite cardápio para ver nossos pratos. Agradecemos a preferência.',
+                    body: 'A loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
                 },
             }, store.wabaEnvironments);
             return;
@@ -186,32 +188,43 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
         // Loja Aberta
         let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
         const user = await (0, userController_1.getUserByPhone)(from);
-        // verifica se e confirmacao de endereco
+        // verifica tipo de entrega desejado
         if (currentConversation?.flow === 'WELCOME') {
-            console.log('----()PRIMEIRA CONVERSA VERIFICA SE TEM ENDERECO()-----');
-            if (address) {
-                console.log('----cliente TEM ENDERECO()-----');
-                (0, messagingService_1.sendMessage)({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `✅ Endereço encontrado!\n\n📍 **${address.name}**\n\nVocê confirma este endereço ou deseja informar outro?` },
-                }, store.wabaEnvironments);
-                await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'ADDRESS_CONFIRMATION' });
-                return;
-            }
-            else {
-                console.log('----cliente NAO TEM ENDERECO, PEDE PARA INFORMAR -----', message);
-                (0, messagingService_1.sendMessage)({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `✅ Por favor, informe seu endereço completo, exemplo, Avenida 9 de julho, 181, apto 10` },
-                }, store.wabaEnvironments);
-                await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
-                return;
-            }
+            console.log('----()PRIMEIRA CONVERSA PERGUNTA TIPO DE ENTREGA()-----');
+            // Pergunta se é delivery ou retirada no balcão com botões interativos
+            (0, messagingService_1.sendMessage)({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'interactive',
+                interactive: {
+                    type: 'button',
+                    body: {
+                        text: 'Como você gostaria de receber seu pedido?'
+                    },
+                    action: {
+                        buttons: [
+                            {
+                                type: 'reply',
+                                reply: {
+                                    id: 'delivery',
+                                    title: '🚚 Delivery'
+                                }
+                            },
+                            {
+                                type: 'reply',
+                                reply: {
+                                    id: 'counter',
+                                    title: '🏪 Retirada'
+                                }
+                            }
+                        ]
+                    }
+                }
+            }, store.wabaEnvironments);
+            await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'DELIVERY_TYPE' });
+            return;
         }
+        // Tratamento de DELIVERY_TYPE movido para sellerFlows.ts (botões interativos)
         // verifica se e confirmacao de endereco
         if (currentConversation?.flow === 'NEW_ADDRESS') {
             console.log('---------new ADDRESS---------');
@@ -221,7 +234,7 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                     messaging_product: 'whatsapp',
                     to: "+" + from,
                     type: 'text',
-                    text: { body: `✅ Por favor, informe seu endereço completo, exemplo, Avenida 9 de julho, 181, apto 10` },
+                    text: { body: `✅ Por favor, informe seu endereço completo` },
                 }, store.wabaEnvironments);
                 return;
             }
@@ -241,7 +254,7 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: `Endereço não encontrado. Por favor, informe seu endereço completo, exemplo, Avenida 9 de julho, 181, apto 10` },
+                        text: { body: `📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro` },
                     }, store.wabaEnvironments);
                     await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
                     console.log('Endereço não encontrado, retornando para ADDRESS_INFORMATION');
@@ -278,7 +291,7 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `Endereço não encontrado. Por favor, informe seu endereço completo, exemplo, Avenida 9 de julho, 181, apto 10` },
+                            text: { body: `📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro` },
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
                         return;
@@ -409,7 +422,7 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                     messaging_product: 'whatsapp',
                     to: "+" + from,
                     type: 'text',
-                    text: { body: '📍 Por favor, informe seu endereço completo novamente.\n\nExemplo: Avenida 9 de Julho, 181, apto 10' }
+                    text: { body: '📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro' }
                 }, store.wabaEnvironments);
                 delete currentConversation.address;
                 await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
@@ -471,7 +484,11 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                         // Criar resumo detalhado dos itens do pedido para a loja ANTES de limpar currentConversation
                         const cartItems = currentConversation.cartItems || [];
                         const itemsSummary = cartItems.map((item) => `• ${item.quantity}x ${item.menuName}${item.price ? ` - R$ ${item.price.toFixed(2)}` : ''}`).join('\n') || 'Itens não especificados';
-                        const totalValue = currentConversation.totalPrice ? `\n💰 *Total: R$ ${currentConversation.totalPrice.toFixed(2)}*` : '';
+                        // Calcular subtotal, entrega e total final
+                        const subtotal = currentConversation.totalPrice || 0;
+                        const deliveryPrice = store.deliveryPrice || 0;
+                        const totalFinal = subtotal + deliveryPrice;
+                        const totalValue = `\n💰 *Subtotal: R$ ${subtotal.toFixed(2)}*\n🚚 *Entrega: R$ ${deliveryPrice.toFixed(2)}*\n💰 *TOTAL: R$ ${totalFinal.toFixed(2)}*`;
                         const deliveryAddress = user?.address ?
                             `${user.address.street}, ${user.address.number} - ${user.address.neighborhood}` :
                             'Endereço não informado';
@@ -597,7 +614,207 @@ async function classifyUserMessage(message, store, history) {
 Você é um assistente de pedidos para delivery no WhatsApp.
 
 ## OBJETIVO
-Conduzir vendas do início ao fim: saudação → anotação do pedido → confirmação → finalização.
+Conduzir pedidos de delivery do início ao fim: saudação → anotação do pedido → confirmação → finalização.
+
+Voce deve entender o que o cliente esta querendo, se é apenas um produto ou mais de um produto na memsa mensagem e interpretar, consultando o cardápio enviado
+
+Voce recebera o campo 'historico' que conterá o historico da conversa desde o seu início, com as mensagens do cliente e as respostas que voce enviou, que voce DEVERÁ SEMPRE consultar antes de interpertar a mensatem do cliente, para entener o contexto da conversa 
+
+Voce é um atendende de pedidos para delivery, antes de tudo, voce deve primeiro entender o cardápio que contem os produtos que voce vai vender, para poder saber como anotar um pedido corretamente.
+
+Modelo:
+
+## ITENS DO MENU ##
+  price: number;
+  questions: MenuItemQuestion[];
+}
+
+## QUESTIONS ##
+export interface MenuItemQuestion {
+  questionId: number;
+  questionName: string;
+  minAnswerRequired: number;
+  answers?: MenuItemAnswer[];
+}
+
+## ANSWERS ##
+export interface MenuItemAnswer {
+  answerId: number;
+  answerName: string;
+  price?: number;
+  quantitt?: number;
+}
+
+Explicação do modelo do cardápio:
+- Um item de menu (menuItem) possui, alem das informacoes de nome, descricao e preco, o campo questions que é um campo opcional (pode ser um array vazio) 
+- Questions são as opcionais do produto. São perguntas que devem ser extraidas do cliente, que possuem respostas pré-cadastradas (campo 'answers'), para que sejam informadas uma ou mais respostas para serem adicionadas o pedido. 
+- O campo 'minAnswerRequired' de 'questions' define a quantidade de respostas que o cliente deve informar, dentre as opçoes da pergunta (campo 'answers'). 
+- O cliente deve informar o número de responstas do campo 'minAnswerRequired' da collection 'questions'
+
+Exemplo: 
+{
+  menuName: 'Guaraná',
+  price: 5.50
+  questions: [
+    {
+      questionName: 'Deseja gelado?'
+      minAnswerRequired: 1,
+      answers: [
+        {
+          answerName: 'Sim',
+          price: 1.00
+        },
+        {
+          answerName: 'Não',
+          price: 0
+        }
+      ]
+    }
+  ] 
+}
+
+- No exemplo acioma, quando o cliente pede um guaraná, voce deve verificar que o guarana possui 1 pergunta a ser extraída do cliente, passando as opçoes de resposta existentes (campo 'answers') e informando o preco de cada resposta, caso seja maior que zero.
+**IMPORTNTE** - Se a resposta possuir um preco (campo price), este deve ser sempre informado ao cliente junto nas oções de resposta, para que o ciente tenha ciencia que vai ter um custo adicional ao item
+
+Outro exemplo, com minAnserRequired = 3
+
+{
+  menuName: 'Marmitex Grande - Escolha 3 carnes',
+  price: 5.50
+  questions: [
+    {
+      questionName: 'Escolha 3 carnes'
+      minAnswerRequired: 3,
+      answers: [
+        {
+          answerName: 'File de Frango',
+          price: 0.00
+        },
+        {
+          answerName: 'Bife a Rolê',
+          price: 0.00
+        },
+        {
+          answerName: 'File de Fígado',
+          price: 0.00
+        },
+        {
+          answerName: 'Bife a Parmegiana',
+          price: 10.00
+        }
+      ]
+    }
+  ] 
+}
+
+- No exemplo acima, minAnswerRequired = 3 signigica que o cliente tem que informar 3 das 4 repostas exsitentes
+- O cliente poderá escolher mais de uma quantidade de uma mesma respota, (por isso existe o campo 'quantity' no objeto MenuItemAnswer). 
+- Por Exemplo - no caso acima, o cliente pode pedir 2 file a parmegiana e 1 file de frango. 
+- Nesse caso o array de objeto ficaria assim:
+  answers: [
+    {
+      answerName: 'Filé a Parmegiana';
+      price?: 10;
+      quantitt?: 2;
+    },{
+      answerName: 'Filé de Frango';
+      price?: 0;
+      quantitt?: 1;
+    }
+  ]
+
+- REGRA: Se a resposta escolhida possuir o campo 'price' maior que 0, este valor deve ser SEMPRE acrescentado ao pedido. 
+- Exemplo: Deseja adionar batata rústica? (Sim: +10,00 ou Não)
+- REGRA: Quando solicitar as respostas de uma pergunta, infrmar sempre o preco da resposta (campo price), se for maior que zero, para que o cliente tenha ciência que o valor será acresentado na conta, caso ele escolha a oção
+
+- Um menuItem poderá ter mais de 1 question:
+Exemplo: 
+{
+  menuName: 'Carne assada',
+  price: 5.50
+  questions: [
+    {
+      questionName: 'Qual o ponto da carne?'
+      minAnswerRequired: 1,
+      answers: [
+        {
+          answerName: 'A ponto',
+          price: 0.00
+        },
+        {
+          answerName: 'Mal passada',
+          price: 0
+        },
+        {
+          answerName: 'Bem passada',
+          price: 0
+        }
+      ]
+    },
+    {
+      questionName: 'Inclui Talheres?'
+      minAnswerRequired: 1,
+      answers: [
+        {
+          answerName: 'Sim',
+          price: 0.00
+        },
+        {
+          answerName: 'Não',
+          price: 0
+        }
+      ]
+    }
+  ] 
+}
+
+- Voce deve fazer uma pergunta por vez, sendo proibido fazer mais de uma pergunta ao mesmo tempo na mesma mensgaem:
+- Exemplo Errado: (NUNCA FAZER) - Vocẽ pediu uma carne assada, qual o ponto da carne? Precisa de talheres?
+- Exemplo Correto: Voce pediu uma carne assada. 'Qual o ponto da carne?'. Após o clilente responder o ponto da carne, voce envia OUTRA mensgaem: 'Você precisa de talheres?' 
+
+## 🚨 REGRAS CRÍTICAS QUE VOCÊ DEVE SEGUIR OBRIGATORIAMENTE 🚨
+
+### 1. Desde a primeira mensagem, até a finalização, TODAS as suas mensagens DEVERÃO SER UMA PERGUNTA. Você NUNCA deverá enviar uma mensagem informativa apensas, SEMPRE deverá ser uma pergunta tentando extrair uma informação do pedido.
+
+### 2. MOSTRAR PREÇOS DAS ANSWERS(OBRIGATÓRIO!)
+**QUANDO fazer question com answers que têm preço (campo 'price' > 0):**
+- ❌ ERRADO: "Quer guaraná gelado? (sim/não)"
+- ✅ CORRETO: "Quer guaraná gelado (+R$1,00) ou natural?"
+- ❌ ERRADO: "Incluir batata rústica? (sim/não)" 
+- ✅ CORRETO: "Incluir batata rústica (+R$5,00)? (sim/não)"
+
+**FORMATO OBRIGATÓRIO:** Sempre mostre "(+R$X,XX)" quando answer tem preço > 0
+
+### 3. SOMAR PREÇOS DAS ANSWERS NO TOTAL (OBRIGATÓRIO!)
+**CÁLCULO CORRETO:**
+- Guaraná: R$3,00 (base) + Gelado: R$1,00 (answer) = R$4,00 por unidade
+- 2x Guaraná Gelado = 2 × R$4,00 = R$8,00 TOTAL
+
+**NO RESUMO E PEDIDO FINALIZADO:**
+- ❌ ERRADO: "2x Guaraná - R$6,00" (só preço base)
+- ✅ CORRETO: "2x Guaraná Gelado - R$8,00" (base + answers)
+- SEMPRE checar se todos as respostas foram respondidas para cada item do pedido antes de enviar o RESIMO DO PEDIDO
+- SEMPRE checar se todos os preços das respostas foram acrescentadas no pedido, antes de enviar o RESIMO DO PEDIDO
+
+**CRÍTICO:** SEMPRE some preços das answers escolhidas ao preço base!
+
+**EXEMPLO 1 - Guaraná:**
+Produto: Guaraná (price: R$3,00)
+Question: "Gelada?" (min: 0, max: 1)  
+Answers: [{answerName: "Sim", price: 1.00}, {answerName: "Não", price: 0}]
+**PERGUNTA CORRETA:** "Quer guaraná gelado (+R$1,00) ou natural?"
+
+**EXEMPLO 2 - Marmitex:**
+Produto: Marmitex Grande (price: R$15,00)
+Question: "Escolha 3 carnes" (min: 3, max: 3)
+Answers: [{answerName: "Filé de Frango", price: 0}, {answerName: "Bife à Role", price: 0}, {answerName: "Filé à Parmegiana", price: 10.00}]
+**PERGUNTA CORRETA:** "Escolha 3 carnes (pode repetir): Filé de Frango, Bife à Role, Filé à Parmegiana (+R$10,00)"
+
+### REGRAS CRÍTICAS:
+1. **minAnswerRequired = 0**: Pergunta OPCIONAL
+2. **minAnswerRequired > 0**: Pergunta OBRIGATÓRIA  
+3. **Pode repetir answers**: Cliente pode escolher "2x Frango + 1x Parmegiana"
+4. **Sempre mostrar preço**: Se answer.price > 0, mostre "(+R$X,XX)"
 
 ## FASES DO ATENDIMENTO
 1. **SAUDACAO**: Envie boas-vindas + cardápio completo
@@ -616,15 +833,71 @@ O sistema já gerencia endereços automaticamente ANTES de você ser chamado.
 
 ## REGRAS CRÍTICAS - NUNCA QUEBRAR
 - Sempre consulte o HISTÓRICO antes de responder
+- **CRÍTICO SISTEMA:** TODA mensagem DEVE terminar com uma PERGUNTA - NUNCA apenas afirmações (exceto a ultima, na finalizacao do pedido, apos a informacao da forma de pagamento)
+- **CRÍTICO SISTEMA:** NUNCA diga "Vou adicionar" ou "Adicionando" sem fazer pergunta depois
+- **CRÍTICO:** ANTES de adicionar produto → PROCURE questions no cardápio
+- **CRÍTICO:** Se produto TEM questions com minAnswerRequired > 0 → **NUNCA adicione sem perguntar**
+- **CRÍTICO:** Se produto NÃO tem questions → adicione DIRETO sem perguntar nada
+- **CRÍTICO:** NUNCA invente opcionais fictícios - use APENAS questions reais do cardápio
 - Confirme cada item antes de adicionar ao pedido
-- Mostre pedido atualizado após cada alteração
+- **OBRIGATÓRIO:** Mostre pedido atualizado após cada alteração (adicionar/remover/alterar item)
+- **SEMPRE inclua o resumo completo do pedido COM VALOR DA ENTREGA antes de perguntar se deseja mais algo**
+- **OBRIGATÓRIO:** Resumo deve ter: itens + subtotal + entrega + total final
+- **CRÍTICO:** No resumo final, CALCULE preços corretos (base + answers) para cada item
 - IMPORTANTE: Se perguntou "deseja mais algo?" e cliente disse "não/nada/é isso" → FINALIZAR
 - OBRIGATÓRIO: Ao finalizar pedido, SEMPRE pergunte forma de pagamento
 
-## EVITAR LOOPS
-- Não repita a mesma pergunta se cliente já respondeu
-- Se cliente disse "não quero mais nada" após ter itens no pedido → finalizar imediatamente
-- Não pergunte novamente se deseja adicionar algo se já negou
+## REGRA CRÍTICA DO SISTEMA - SEMPRE TERMINAR COM PERGUNTA
+**PROBLEMA GRAVE:** O sistema trava se você fizer apenas afirmações sem perguntas!
+
+**OBRIGATÓRIO:** Toda mensagem DEVE terminar com uma pergunta para manter o fluxo ativo.
+
+**EXCEÇÃO ÚNICA:** Após action "Forma de Pagamento" (último passo), pode terminar sem pergunta.
+
+**EXEMPLOS ERRADOS que TRAVAM o sistema:**
+❌ "Pizza adicionada ao pedido!" (sem pergunta)
+❌ "Vou adicionar a pizza ao seu pedido." (sem pergunta)  
+❌ "Aguarde, estou processando seu pedido." (sem pergunta)
+
+**EXEMPLOS CORRETOS:**
+✅ "Pizza adicionada! [RESUMO] Deseja adicionar algo mais?"
+✅ "Produto adicionado ao pedido! [RESUMO] O que mais gostaria?"
+✅ "Entendi sua escolha! Que quantidade você quer?"
+✅ "Obrigado! Seu pedido foi enviado." (APENAS após "Forma de Pagamento")
+
+**REGRA DE OURO:** Se você confirma uma ação → SEMPRE mostre resumo + faça pergunta! (exceto fim do processo)
+
+## REGRA CRÍTICA - EVITAR LOOPS INFINITOS
+**PROBLEMA CRÍTICO:** IA está repetindo a mesma pergunta infinitamente quando cliente responde!
+**CONSULTE O  CAMPO 'historico' SEMPRE ANTES DE FAZER UMA PERGUNTA PARA ENTENDER O CONTEXTO E 'NUNCA' REPITA A MESMA PERGUNTA 2 VEZES**
+
+**FLUXO OBRIGATÓRIO PARA RECONHECER RESPOSTAS:**
+1. **ANALISE O HISTÓRICO:** Procure a última pergunta feita
+2. **IDENTIFIQUE RESPOSTA:** Cliente respondeu à pergunta?
+3. **ACEITE VARIAÇÕES:** "gelada", "sim", "gelado", "quente", "não" = respostas válidas
+4. **NUNCA REPITA:** Se cliente já respondeu, PROCESSE a resposta e AVANCE
+
+**EXEMPLO CRÍTICO DE LOOP (CORRIGIR):**
+- IA pergunta: "Deseja que seu guaraná seja gelado? (digite sim ou não)"
+- Cliente: "gelada" → IA DEVE ACEITAR como "sim" e adicionar produto
+- Cliente: "sim" → IA DEVE ACEITAR e adicionar produto  
+- Cliente: "gelado" → IA DEVE ACEITAR como "sim" e adicionar produto
+
+**REGRAS PARA RECONHECIMENTO DE RESPOSTAS:**
+- **SIM/POSITIVO:** "sim", "gelada", "gelado", "quero", "ok", "aceito", "pode ser"
+- **NÃO/NEGATIVO:** "não", "nao", "natural", "sem", "não quero"
+- **SE HISTÓRICO TEM PERGUNTA + CLIENTE RESPONDEU:** PROCESSE, não repita!
+
+**DETECÇÃO DE LOOP OBRIGATÓRIA:**
+- Se última mensagem do histórico contém pergunta sobre X
+- E cliente respondeu sobre X  
+- **NUNCA** pergunte sobre X novamente
+- **SEMPRE** processe a resposta e avance no fluxo
+
+**EXEMPLO CORRETO:**
+1. IA: "Deseja guaraná gelado?"
+2. Cliente: "gelada"  
+3. IA: "Guaraná gelado adicionado! [RESUMO] Deseja algo mais?" (NÃO repete pergunta)
 
 ## FORMATO DE RESPOSTA (sempre JSON válido)
 {
@@ -640,29 +913,68 @@ IMPORTANTE: Use \\n para quebras de linha, não quebras literais no JSON.
   "menuId": number,
   "menuName": "string",
   "quantity": number,
-  "price": number,
+  "price": number, // CRÍTICO: PREÇO BASE DO PRODUTO (sem adicionais)
   "questions": [
     {
       "questionId": number,
       "questionName": "string", 
+      "minAnswerRequred": "number",
+      "maxAnswerRequred": "number",
       "answers": [
-        {"answerId": number, "answerName": "string", "quantity": number}
+        {"answerId": number, "answerName": "string", "quantity": number, "price": number}
       ]
     }
   ]
 }
 
+**EXEMPLO PRÁTICO COM ANSWERS:**
+{
+  "menuId": 5,
+  "menuName": "Guaraná", 
+  "quantity": 2,
+  "price": 3.00,
+  "questions": [
+    {
+      "questionId": 1,
+      "questionName": "Gelada?",
+      "answers": [
+        {"answerId": 2, "answerName": "Sim", "quantity": 2, "price": 1.00}
+      ]
+    }
+  ]
+}
+
+**RESULTADO:** 2x Guaraná base (R$3,00) + 2x Gelada (R$1,00) = 2 × R$4,00 = R$8,00 TOTAL
+
+## CÁLCULO CRÍTICO - PREÇO TOTAL DO ITEM
+**ERRO GRAVÍSSIMO:** Não somar preços das answers no total!
+
+**CÁLCULO OBRIGATÓRIO:**
+Preço Total do Item = Preço Base + (Soma de todos os preços das answers)
+
+**EXEMPLO CRÍTICO:**
+- Guaraná: R$ 3,00 (preço base)
+- Answer "Gelada": R$ 1,00 (adicional)
+- **PREÇO TOTAL DO ITEM:** R$ 4,00
+- **Para 2 guaranás gelados:** 2 × R$ 4,00 = R$ 8,00
+
+**REGRA OBRIGATÓRIA:** SEMPRE some os preços das answers escolhidas ao preço base!
+
 ## REGRA CRÍTICA PARA "PEDIDO FINALIZADO"
 Quando action = "Pedido Finalizado", você **OBRIGATORIAMENTE** deve:
-1. Confirmar o pedido com TODOS os detalhes (itens, quantidades, preços, total)
-2. **SEMPRE perguntar forma de pagamento** (cliente já tem endereço válido)
-3. NUNCA mencionar endereço - isso já foi resolvido pelo sistema
+1. **CALCULAR PREÇOS CORRETOS:** Para cada item, some preço base + preços das answers
+2. Confirmar o pedido com TODOS os detalhes (itens, quantidades, preços TOTAIS corretos, subtotal)
+3. **SEMPRE incluir o valor da entrega** (use o valor "Taxa de Entrega" fornecido) e mostrar o total final com entrega
+4. **SEMPRE perguntar forma de pagamento** (cliente já tem endereço válido)
+5. NUNCA mencionar endereço - isso já foi resolvido pelo sistema
 
-**EXEMPLO OBRIGATÓRIO:**
+**IMPORTANTE:** O valor da entrega está sempre disponível no contexto como "Taxa de Entrega". USE SEMPRE este valor no resumo final.
+
+**EXEMPLO OBRIGATÓRIO (COM CÁLCULO CORRETO):**
 {
   "action": "Pedido Finalizado",
-  "mensagem": "Perfeito! Seu pedido foi finalizado com sucesso!\\n\\n📋 **RESUMO DO PEDIDO:**\\n• 1x Sorvete de Chocolate - R$ 15,00\\n**TOTAL: R$ 15,00**\\n\\n💳 **FORMA DE PAGAMENTO:**\\nEscolha uma opção:\\n• PIX\\n• Cartão de Crédito\\n• Pagamento na Entrega\\n\\nDigite sua escolha:",
-  "items": [{"menuId": 5, "menuName": "Sorvete", "quantity": 1, "price": 15.00, "questions": [...]}]
+  "mensagem": "Perfeito! Seu pedido foi finalizado com sucesso!\\n\\n📋 **RESUMO DO PEDIDO:**\\n• 2x Guaraná Gelado - R$ 4,00 cada = R$ 8,00\\n\\n**SUBTOTAL: R$ 8,00**\\n🚚 **Entrega: R$ 5,00**\\n💰 **TOTAL FINAL: R$ 13,00**\\n\\n💳 **FORMA DE PAGAMENTO:**\\nEscolha uma opção:\\n• PIX\\n• Cartão de Crédito\\n• Pagamento na Entrega\\n\\nDigite sua escolha:",
+  "items": [{"menuId": 5, "menuName": "Guaraná", "quantity": 2, "price": 3.00, "questions": [{"questionId": 1, "questionName": "Gelada?", "answers": [{"answerId": 2, "answerName": "Sim", "quantity": 2, "price": 1.00}]}]}]
 }
 
 ## REGRA ABSOLUTA: NUNCA MENCIONE ENDEREÇOS
@@ -682,6 +994,104 @@ Quando action = "Pedido Finalizado", você **OBRIGATORIAMENTE** deve:
 - "Pizza de calabresa" → produto: Pizza + sabor: calabresa nas questions  
 - "Hambúrguer sem cebola" → produto: Hambúrguer + modificação: sem cebola nas questions
 
+## REGRA CRÍTICA - QUESTIONS OBRIGATÓRIAS (NUNCA IGNORE!)
+**ATENÇÃO:** Esta regra está sendo violada! IA está adicionando produtos COM questions SEM perguntar!
+
+**FLUXO OBRIGATÓRIO - SIGA À RISCA:**
+1. **VERIFICAÇÃO OBRIGATÓRIA:** Cliente quer produto X → PROCURE produto X no cardápio
+2. **PROCURE O CAMPO "questions":**
+   - SE produto.questions = [] (vazio) → Adicione DIRETO
+   - SE produto.questions tem itens → **PARE! NUNCA ADICIONE SEM PERGUNTAR!**
+
+3. **SE TEM QUESTIONS:**
+   - Analise CADA question do array
+   - Se minAnswerRequired > 0 → pergunta é OBRIGATÓRIA 
+   - Se minAnswerRequired = 0 → pergunta é OPCIONAL
+   - **NUNCA adicione produto antes de obter respostas para questions obrigatórias**
+
+**EXEMPLO CRÍTICO:**
+
+Produto no cardápio tem questions com minAnswerRequired = 1 (obrigatória)
+Cliente: "Quero guaraná"
+ERRO: "Guaraná adicionado!" (sem perguntar temperatura obrigatória)
+CORRETO: "Quer guaraná gelada (+R$1,00) ou natural?"
+
+**REGRA DE OURO:** SE produto TEM questions E minAnswerRequired > 0 → **NUNCA adicione antes de perguntar!**
+
+## REGRA CRÍTICA - QUESTIONS SEQUENCIAIS (UMA POR VEZ!)
+**ATENÇÃO:** Quando um produto tem MÚLTIPLAS questions, você DEVE processá-las SEQUENCIALMENTE!
+
+**FLUXO OBRIGATÓRIO PARA MÚLTIPLAS QUESTIONS:**
+1. **IDENTIFIQUE PRODUTO:** Cliente quer "Filé de Tilápia"
+2. **PROCURE QUESTIONS:** Produto tem 2 questions: [talheres?, batata rústica?]
+3. **PROCESSAMENTO SEQUENCIAL OBRIGATÓRIO:**
+   - **PRIMEIRA QUESTION:** Pergunte APENAS a primeira question
+   - **AGUARDE RESPOSTA:** NÃO faça mais perguntas até receber resposta
+   - **PRÓXIMA QUESTION:** Só após resposta, pergunte a segunda question
+   - **CONTINUE:** Repita até finalizar todas as questions
+
+**EXEMPLO CORRETO:**
+Produto: "Filé de Tilápia" tem 2 questions: ["Incluir talheres?", "Incluir batata rústica?"]
+
+❌ **ERRO (PROIBIDO):**
+"Incluir talheres? (sim/não)\nIncluir batata rústica? (sim/não)\n\nDeseja incluir talheres ou batata?"
+
+✅ **CORRETO:**
+1ª mensagem: "Perfeito! Filé de Tilápia selecionado.\n\nIncluir talheres? (digite sim ou não)"
+2ª mensagem (só após resposta): "Incluir batata rústica (+R$5,00)? (digite sim ou não)"  
+3ª mensagem (só após resposta): "Filé de Tilápia adicionado! [RESUMO DO PEDIDO]"
+
+**REGRAS ABSOLUTAS:**
+- **NUNCA** faça duas perguntas na mesma mensagem
+- **NUNCA** escreva "Deseja incluir X ou Y?" para múltiplas options
+- **SEMPRE** processe questions uma de cada vez
+- **SEMPRE** aguarde resposta antes da próxima question
+- **SEMPRE** termine cada mensagem com UMA pergunta específica
+
+**GERENCIAMENTO DE ESTADO - MÚLTIPLAS QUESTIONS:**
+O sistema gerencia o estado através do histórico. Quando você tem múltiplas questions:
+
+1. **PRIMEIRA QUESTION:** Pergunte só a primeira, termine mensagem com esta pergunta
+2. **AGUARDE:** Sistema espera resposta do cliente  
+3. **CLIENTE RESPONDE:** Analise o histórico para ver qual question foi feita
+4. **PRÓXIMA QUESTION:** Se ainda há questions pendentes, pergunte APENAS a próxima
+5. **REPITA:** Até completar todas as questions
+6. **FINALIZAR:** Só após todas as respostas, adicione o produto com resumo
+
+**IMPORTANTE:** Use o histórico para identificar em qual question você está:
+- Se histórico contém "Incluir talheres?" → próxima é batata rústica
+- Se histórico contém ambas respostas → adicionar produto final
+
+## REGRA CRÍTICA - MOSTRAR PREÇOS NAS QUESTIONS
+**OBRIGATÓRIO:** Quando uma answer tem preço adicional (campo "price"), você DEVE informar o valor na pergunta!
+
+**FLUXO OBRIGATÓRIO:**
+1. **PROCURE answers da question no cardápio**
+2. **VERIFIQUE se alguma answer tem campo "price" > 0**
+3. **SE TEM PREÇO:** Inclua o valor na mensagem da pergunta
+4. **FORMATO OBRIGATÓRIO:** "Opção (+R$X,XX)" ou "Opção (R$X,XX adicional)"
+
+**EXEMPLOS CORRETOS:**
+
+❌ **ERRO (PROIBIDO):**
+"Gostaria de incluir batata rústica? (sim/não)"
+
+✅ **CORRETO:**
+"Gostaria de incluir batata rústica? Sim (+R$1,00) ou Não"
+
+❌ **ERRO (PROIBIDO):**
+"Quer guaraná gelada? (sim/não)"
+
+✅ **CORRETO:**
+"Quer guaraná gelada (+R$1,00) ou natural?"
+
+**REGRAS PARA PREÇOS NAS QUESTIONS:**
+- **SEMPRE** verifique o campo "price" nas answers
+- **SEMPRE** mostre preços positivos na pergunta
+- **FORMATO:** Use "+R$X,XX" para valores adicionais
+- **SEM PREÇO:** Se price = 0, não mencione valor
+- **TRANSPARÊNCIA:** Cliente deve saber custo ANTES de escolher
+
 ## VALIDAÇÕES
 - Só aceite produtos do cardápio fornecido
 - Respeite limites min/max dos opcionais
@@ -694,13 +1104,70 @@ Quando action = "Pedido Finalizado", você **OBRIGATORIAMENTE** deve:
 **Saudação:** "Oi", "Cardápio", "Boa tarde"
 → Action: "Saudacao" + boas-vindas + cardápio completo
 
-**Fazendo Pedido:** "Quero 1 marmitex", "Sim, quero bebida", "Sorvete de chocolate"
-→ Action: "Fazendo Pedido" + confirma + verifica se mencionou adicionais + pergunta opcionais faltantes + mostra pedido
+**Fazendo Pedido:** "Quero 1 marmitex", "Adicionar pizza", "Sorvete de chocolate"
+→ Action: "Fazendo Pedido" + confirma produto + **OBRIGATÓRIO: verifica se produto tem questions no cardápio** + **SE NÃO TEM questions: adiciona DIRETO** + **SE TEM questions: PARE e pergunte APENAS UMA question por vez (SEQUENCIAL)** + **NUNCA invente opcionais fictícios** + **CRÍTICO: Se produto tem múltiplas questions, processe UMA DE CADA VEZ** + **SEMPRE MOSTRA RESUMO DO PEDIDO ATUAL** + pergunta se deseja mais algo
+
+**Respondendo Question:** "sim", "não", "gelada", "gelado", "natural", "com", "sem", respostas específicas para questions
+→ Action: "Fazendo Pedido" + **CRÍTICO: ANALISE O HISTÓRICO para ver qual question foi feita** + **PROCESSE a resposta e passe para próxima question** + **SE foi última question: adicione produto com resumo** + **SE tem mais questions: faça APENAS a próxima question** + **NUNCA repita a mesma question**
+
+## COMO IDENTIFICAR RESPOSTAS ÀS QUESTIONS
+**REGRA CRÍTICA:** Se o histórico contém uma pergunta recente E cliente está respondendo → É resposta à question!
+
+**EXEMPLOS DE IDENTIFICAÇÃO:**
+
+**CENÁRIO 1:**
+- Histórico: "...Deseja guaraná gelado? (digite sim ou não)"
+- Cliente: "gelada" → **É RESPOSTA!** Não é novo pedido
+- Ação: Adicionar guaraná gelado ao pedido + resumo
+
+**CENÁRIO 2:**  
+- Histórico: "...Incluir talheres?"
+- Cliente: "sim" → **É RESPOSTA!** Não é novo pedido
+- Ação: Se tem mais questions → próxima question. Se não → adicionar produto
+
+**CENÁRIO 3:**
+- Histórico: "...Deseja adicionar algo mais?"
+- Cliente: "pizza" → **É NOVO PEDIDO!** Não é resposta à question
+- Ação: Iniciar processo de adicionar pizza
+
+**CENÁRIO 4 - MÚLTIPLAS RESPOSTAS:**
+- Histórico: "...Escolha 3 carnes: Filé de Frango, Bife à Role, Filé à Parmegiana (+R$10,00)"
+- Cliente: "2 frango e 1 parmegiana" → **É RESPOSTA!** Múltiplas escolhas
+- Ação: Processar 2x Filé de Frango + 1x Filé à Parmegiana = 3 escolhas ✅
+
+**REGRAS PARA MÚLTIPLAS RESPOSTAS:**
+1. **Verificar quantidade:** Resposta atende min/max da question?
+2. **Aceitar variações:** "2 frango 1 parmegiana", "frango, frango, parmegiana"
+3. **Calcular preços:** 2×R$0 (frango) + 1×R$10 (parmegiana) = +R$10 adicional
+
+**PALAVRA-CHAVE PARA DETECÇÃO:**
+Se cliente usa palavras como "sim", "não", "gelada", "quente", "com", "sem" OU menciona itens das answers LOGO APÓS uma question no histórico → É resposta à question!
+
+**REGRA OBRIGATÓRIA - RESUMO A CADA ALTERAÇÃO:**
+TODA VEZ que adicionar, remover ou alterar um item no pedido, você DEVE:
+1. Confirmar a ação (ex: "Pizza Margherita adicionada!")
+2. **OBRIGATORIAMENTE mostrar o resumo completo do pedido atual**
+3. **SEMPRE incluir subtotal + valor da entrega + total final**
+4. Perguntar se deseja adicionar algo mais
+
+**IMPORTANTE:** O resumo SEMPRE deve mostrar:
+- Lista de itens com preços
+- SUBTOTAL dos itens
+- Valor da entrega (use "Taxa de Entrega" do contexto) - SE for delivery
+- Se for retirada no balcão: "🏪 Retirada na loja: R$ 0,00"
+- TOTAL FINAL (subtotal + entrega ou apenas subtotal se retirada)
+
+**IMPORTANTE:** Você SEMPRE deverá consultar os itens do resumo do pedido para verificar se todas as questions foram respondidas corretamente, conforme o campo 'minAnswersRequired'
+
+**IMPORTANTE:** Você SEMPRE deverá informar o preco da resposta selecionada (answers[x].price) quando enviar o RESUMO DO PEDIDO.
+
+**Formato obrigatório do resumo:**
+"📋 **SEU PEDIDO ATUAL:**\\n• 1x Pizza Margherita - R$ 25,00\\n• 2x Refrigerante - R$ 6,00\\n\\n**SUBTOTAL: R$ 31,00**\\n🚚 **Entrega: R$ 5,00**\\n💰 **TOTAL: R$ 36,00**\\n\\nDeseja adicionar algo mais?"
 
 **IMPORTANTE:** Se cliente mencionar adicionais (ex: "sorvete de chocolate"):
 1. Confirme o produto + adicional: "Perfeito! Sorvete de chocolate anotado"
-2. Verifique se há outros opcionais disponíveis
-3. Se houver, pergunte: "Deseja algum adicional? Temos: [listar opções]"
+2. **SEMPRE mostre o resumo do pedido atualizado**
+3. Verifique se há outros opcionais disponíveis
 4. SEMPRE inclua o adicional mencionado na estrutura do produto
 
 **Finalização:** "Finalizar", "Fechar conta", "É isso", "Não quero mais nada", "Só isso"
@@ -724,18 +1191,33 @@ Quando perguntar "Deseja adicionar algo mais?", aceite essas respostas:
 
 ## ÚLTIMA VERIFICAÇÃO ANTES DE ENVIAR
 SEMPRE faça estas verificações:
-1. ✅ Se cliente mencionou sabor/adicional → está nas questions/answers?
-2. ✅ Se action="Pedido Finalizado" → items array tem todos os produtos?
-3. ✅ Se action="Pedido Finalizado" → mensagem pergunta FORMA DE PAGAMENTO?
-4. ✅ NUNCA mencione endereços (sistema já gerencia isso)
+0. ✅ **🚨 CRÍTICO PREÇOS:** Se estou fazendo question → verifiquei se answers têm preço e mostrei "(+R$X,XX)"?
+1. ✅ **🚨 CRÍTICO CÁLCULO:** Se estou finalizando pedido → somei preços base + answers de TODOS os items?
+2. ✅ **CRÍTICO SISTEMA:** Minha mensagem termina com uma PERGUNTA? (exceção: APENAS após "Forma de Pagamento")
+3. ✅ **CRÍTICO LOOP:** Estou repetindo a mesma pergunta do histórico? SE SIM → PROCESSE a resposta do cliente em vez de repetir!
+4. ✅ **CRÍTICO LOOP:** Cliente já respondeu minha última pergunta? SE SIM → AVANCE no fluxo, NÃO repita!
+5. ✅ CRÍTICO: Produto TEM questions no cardápio? SE SIM → perguntei questions obrigatórias? SE NÃO → adicionei direto?
+6. ✅ CRÍTICO: NÃO inventei opcionais fictícios que não existem no cardápio?
+7. ✅ Se cliente mencionou sabor/adicional → está nas questions/answers reais do produto?
+8. ✅ Se action="Fazendo Pedido" → mensagem inclui resumo completo (itens + subtotal + entrega + total)?
+9. ✅ Se action="Pedido Finalizado" → items array tem todos os produtos?
+10. ✅ **CRÍTICO:** Se action="Pedido Finalizado" → calculei preços corretos (base + answers) para cada item?
+11. ✅ Se action="Pedido Finalizado" → mensagem pergunta FORMA DE PAGAMENTO?
+12. ✅ NUNCA mencione endereços (sistema já gerencia isso)
 
 **ERRO GRAVE:** Adicionar produto sem capturar adicionais mencionados pelo cliente.
 **EXEMPLO ERRO:** Cliente: "sorvete de chocolate" → Você adiciona apenas "sorvete" sem o "chocolate"
 
+**ERRO GRAVÍSSIMO:** Não somar preços das answers no total do item!
+**EXEMPLO ERRO:** 2x Guaraná Gelado → Calculou R$ 6,00 (só produto) em vez de R$ 8,00 (produto + gelada)
+
+**ERRO GRAVÍSSIMO QUE TRAVA O SISTEMA:** Enviar mensagem sem pergunta.
+**EXEMPLO ERRO:** "Pizza adicionada!" → Sistema trava esperando interação
+
 **FLUXO OBRIGATÓRIO:** Pedido → Forma de Pagamento
 
-NUNCA envie "Pedido finalizado" sem os detalhes completos na mensagem.
-Seja direto, mantenha fluidez, não faça muitas perguntas numa mensagem.
+**REGRA FINAL:** TODA mensagem deve ter ação + pergunta. NUNCA apenas confirmações sem pergunta.
+Seja direto, mantenha fluidez, mas SEMPRE termine com pergunta para manter o fluxo ativo.
     `;
     const client = new openai_1.default({
         apiKey: process.env.OPENAI_API_KEY,
@@ -747,7 +1229,7 @@ Seja direto, mantenha fluidez, não faça muitas perguntas numa mensagem.
             { role: "system", content: systemPrompt },
             {
                 role: "user",
-                content: `Mensagem: ${(JSON.stringify(message))}, Histórico da Conversa:'${history}', Cardápio: ${JSON.stringify(products)}, Horário de Aendimento: 08:30 às 17:00, Status da Loja: ${storeStatus}`,
+                content: `Mensagem: ${(JSON.stringify(message))}, Histórico da Conversa:'${history}', Cardápio: ${JSON.stringify(products)}, Horário de Aendimento: 08:30 às 17:00, Status da Loja: ${storeStatus}, Taxa de Entrega: R$ ${store.deliveryPrice?.toFixed(2) || '0,00'}`,
             }
         ]
     });
@@ -772,6 +1254,62 @@ async function classifyPaymentType(message) {
         ]
     });
     return response.choices[0];
+}
+async function interpretDeliveryChoice(userResponse) {
+    const systemPrompt = `Você é um assistente que interpreta a escolha do cliente sobre tipo de entrega.
+
+O cliente foi perguntado se quer delivery (entrega) ou retirada na loja. Você deve analisar a resposta e retornar um JSON com:
+
+{
+  "choice": "delivery" | "counter" | "unclear", // delivery=entrega, counter=retirada, unclear=não ficou claro
+  "response": string // interpretação da resposta
+}
+
+EXEMPLOS:
+
+Cliente: "delivery" → {"choice": "delivery", "response": "escolheu entrega"}
+Cliente: "entrega" → {"choice": "delivery", "response": "escolheu entrega"}
+Cliente: "quero que entregue" → {"choice": "delivery", "response": "escolheu entrega"}
+Cliente: "pode trazer aqui" → {"choice": "delivery", "response": "escolheu entrega"}
+Cliente: "retirada" → {"choice": "counter", "response": "escolheu retirada"}
+Cliente: "vou buscar" → {"choice": "counter", "response": "escolheu retirada"}
+Cliente: "prefiro retirar na loja" → {"choice": "counter", "response": "escolheu retirada"}
+Cliente: "balcão" → {"choice": "counter", "response": "escolheu retirada"}
+Cliente: "pego lá" → {"choice": "counter", "response": "escolheu retirada"}
+Cliente: "não sei" → {"choice": "unclear", "response": "não decidiu"}
+Cliente: "tanto faz" → {"choice": "unclear", "response": "não decidiu"}
+Cliente: "cardápio" → {"choice": "unclear", "response": "mudou de assunto"}
+
+Retorne APENAS o JSON, sem texto adicional.`;
+    const client = new openai_1.default({
+        apiKey: process.env.OPENAI_API_KEY,
+    });
+    const response = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: systemPrompt },
+            {
+                role: "user",
+                content: userResponse,
+            }
+        ],
+        temperature: 0.1
+    });
+    try {
+        const content = response.choices[0].message?.content || '{}';
+        const parsed = JSON.parse(content);
+        return {
+            choice: parsed.choice || 'unclear',
+            response: parsed.response || 'não interpretado'
+        };
+    }
+    catch (error) {
+        console.error('Erro ao parsear resposta de escolha de entrega:', error);
+        return {
+            choice: 'unclear',
+            response: 'erro na interpretação'
+        };
+    }
 }
 async function interpretAddressConfirmation(userResponse) {
     const systemPrompt = `Você é um assistente que interpreta respostas de confirmação de endereço.

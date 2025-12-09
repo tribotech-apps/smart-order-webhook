@@ -92,11 +92,11 @@ export const createOrder = async (conversation: Conversation, paymentId: string)
     const order: OrderType = {
       id: `${store?.slug}-${(new Date().getUTCMilliseconds() + Math.floor(Math.random() * 100000)).toFixed(0).toString()}`,
       uid: userUid,
-      deliveryOption: 'DELIVERY',
+      deliveryOption: conversation.deliveryOption === 'counter' ? 'COUNTER' : 'DELIVERY',
       address: conversation.address,
       currentFlow: { hour: Timestamp.now(), flowId: OrderFlow.QUEUE },
       customerName: conversation.customerName,
-      deliveryPrice: conversation.deliveryPrice || 0,
+      deliveryPrice: conversation.deliveryOption === 'counter' ? 0 : (conversation.deliveryPrice || 0),
       createdAt: Timestamp.now(),
       items: conversation.cartItems?.map((item: any, index: number) => ({
         id: index ? index + 1 : 1,

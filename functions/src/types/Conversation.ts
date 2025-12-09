@@ -3,6 +3,8 @@ import { MenuItem, MenuItemQuestion, ShoppingCartItem, Store, StoreCategory } fr
 
 export type ConversationFlow =
   "WELCOME" |
+  "DELIVERY_TYPE" |
+  "CHECK_ADDRESS" |
   "ADDRESS_CONFIRMATION" |
   "NEW_ADDRESS" |
   "CATEGORIES" |
@@ -46,6 +48,7 @@ export interface Conversation {
   phoneNumber: string;
   flow: ConversationFlow;
   conversationStage?: ConversationStage;
+  deliveryOption?: 'delivery' | 'counter'; // Tipo de entrega: delivery ou retirada no balcão
   address?: Address;
   category?: StoreCategory;
   products?: ShoppingCartItem[];

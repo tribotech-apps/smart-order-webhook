@@ -16,7 +16,7 @@ import { notifyAdmin, sendContactMessage, sendMessage, sendWelcomeMessage } from
 import { notificationService } from '../../services/notificationService';
 // import { buildCartTableString, buildCartTableStringFromRichText, redirectToOrderSummary } from '../../services/shoppingService';
 import { getProductsByCategory } from '../../services/catalogService';
-import { handleIncomingTextMessage } from '../../services/incomingMessageService';
+import { handleIncomingTextMessage, classifyUserMessage, parseAIResponse } from '../../services/incomingMessageService';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { getUserByPhone } from '../../controllers/userController';
 import { MenuItemAnswer, MenuItemQuestion, WABAEnvironments, QuestionType } from '../../types/Store';
@@ -1799,7 +1799,7 @@ router.post('/webhook', async (req, res) => {
         if (value.messages) {
           const message = value.messages[0];
 
-          console.log('Mensagem recebida', message)
+          console.log('Mensagem recebida', value, message)
 
           const from = message.from; // Número de telefone do remetente
           const type = message.type; // Tipo da mensagem
@@ -1813,7 +1813,7 @@ router.post('/webhook', async (req, res) => {
             if (activeOrder && !currentConversation) {
               // Envia mensagem sobre o status do pedido atual e se quer cancelar
               const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`
-              const messagePayload = {
+              const messagePayload: any = {
                 messaging_product: 'whatsapp',
                 to: '+' + from,
                 type: 'interactive',
@@ -1843,6 +1843,16 @@ router.post('/webhook', async (req, res) => {
                 }
               };
 
+              // Adicionar header com logo da loja se disponível
+              if (store.logo) {
+                messagePayload.interactive.header = {
+                  type: 'image',
+                  image: {
+                    link: store.logo
+                  }
+                };
+              }
+
               if (!store?.wabaEnvironments) return;
 
               await (sendMessage(messagePayload, store.wabaEnvironments))
@@ -1863,7 +1873,7 @@ router.post('/webhook', async (req, res) => {
                 selectedAnswers: [],
                 deliveryPrice: store.deliveryPrice,
                 flowToken,
-                customerName: userFrom?.name || '',
+                customerName,
                 store,
                 message
               };
@@ -1877,7 +1887,7 @@ router.post('/webhook', async (req, res) => {
 
               const responseMessage = `Olá, seja bem vindo, esse canal é exclusivo para pedidos delivery. O que gostaria de fazer hoje?`
 
-              const messagePayload = {
+              const messagePayload: any = {
                 messaging_product: 'whatsapp',
                 to: '+' + from,
                 type: 'interactive',
@@ -1906,6 +1916,16 @@ router.post('/webhook', async (req, res) => {
                   }
                 }
               };
+
+              // Adicionar header com logo da loja se disponível
+              if (store.logo) {
+                messagePayload.interactive.header = {
+                  type: 'image',
+                  image: {
+                    link: store.logo
+                  }
+                };
+              }
 
               if (!store?.wabaEnvironments) return;
 
@@ -1949,8 +1969,99 @@ router.post('/webhook', async (req, res) => {
               }
 
               await handleIncomingTextMessage(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
-            } else {
             }
+
+            else if (message.interactive?.type === 'button_reply' &&
+              (message.interactive?.button_reply?.id === 'delivery' || message.interactive?.button_reply?.id === 'counter')) {
+
+              const deliveryChoice = message.interactive.button_reply.id;
+              let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
+              const userFrom = await getUserByPhone(from);
+
+              console.log(`----BOTÃO ${deliveryChoice.toUpperCase()} CLICADO-----`);
+
+              if (!currentConversation || currentConversation.flow !== 'DELIVERY_TYPE') {
+                console.log('ERRO: Conversa não encontrada ou flow incorreto para delivery choice');
+                return;
+              }
+
+              if (deliveryChoice === 'counter') {
+                // Cliente escolheu retirada no balcão
+                console.log('----cliente ESCOLHEU RETIRADA NO BALCÃO-----')
+
+                await updateConversation(currentConversation, {
+                  deliveryOption: 'counter',
+                  flow: 'CATEGORIES'
+                })
+
+                // Chama o IA com mensagem "cardápio" para iniciar o pedido
+                console.log('Chamando IA com mensagem "cardápio" para iniciar pedido - RETIRADA')
+
+                const cardapioMessage = { text: { body: 'cardápio' } };
+                const intent = await classifyUserMessage(cardapioMessage, store, currentConversation.history || '');
+
+                const content = parseAIResponse((intent as any).message?.content);
+                console.log('Resposta da IA para cardápio (retirada):', content);
+
+                // Atualizar histórico com a resposta da IA
+                await updateConversation(currentConversation, {
+                  deliveryOption: 'counter', // Garantir que mantém como retirada
+                  flow: 'CATEGORIES',
+                  history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} ${content.message}`
+                });
+
+                // Enviar resposta da IA para o cliente
+                if (store.wabaEnvironments) {
+                  await sendMessage({
+                    messaging_product: 'whatsapp',
+                    to: "+" + from,
+                    type: 'text',
+                    text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${content.message}` }
+                  }, store.wabaEnvironments);
+                }
+
+              } else if (deliveryChoice === 'delivery') {
+                // Cliente escolheu delivery
+                console.log('----cliente ESCOLHEU DELIVERY-----')
+
+                await updateConversation(currentConversation, {
+                  deliveryOption: 'delivery',
+                  flow: 'CHECK_ADDRESS'
+                })
+
+                // Agora verifica se tem endereço cadastrado
+                if (userFrom?.address) {
+                  console.log('----cliente TEM ENDERECO-----')
+
+                  if (store.wabaEnvironments) {
+                    await sendMessage({
+                      messaging_product: 'whatsapp',
+                      to: "+" + from,
+                      type: 'text',
+                      text: { body: `✅ Endereço encontrado!\n\n📍 **${userFrom.address.name}**\n\nVocê confirma este endereço ou deseja informar outro?` },
+                    }, store.wabaEnvironments)
+                  }
+
+                  await updateConversation(currentConversation, { flow: 'ADDRESS_CONFIRMATION' })
+
+                } else {
+                  console.log('----cliente NAO TEM ENDERECO, PEDE PARA INFORMAR-----')
+
+                  if (store.wabaEnvironments) {
+                    await sendMessage({
+                      messaging_product: 'whatsapp',
+                      to: "+" + from,
+                      type: 'text',
+                      text: { body: `✅ Por favor, informe seu endereço completo` },
+                    }, store.wabaEnvironments)
+                  }
+
+                  await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' })
+                }
+              }
+            }
+
+
           }
         }
       });
