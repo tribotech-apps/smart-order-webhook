@@ -3,6 +3,57 @@ import express from 'express';
 import { getStoreByWabaPhoneNumberId, getStoreStatus } from '../../controllers/storeController';
 import crypto from 'crypto';
 
+// Função para formatar o cardápio de forma bonita
+function formatBeautifulMenu(products: any[]): string {
+  if (!products || products.length === 0) {
+    return '📋 *Cardápio Vazio*\n\nDesculpe, não temos produtos disponíveis no momento.';
+  }
+
+  let beautifulMenu = '🍽️ *NOSSO CARDÁPIO* 🍽️\n\n';
+
+  products.forEach((product, index) => {
+    // Ícone baseado na categoria/tipo do produto
+    let icon = '🍴';
+    const name = product.menuName.toLowerCase();
+    if (name.includes('pizza')) icon = '🍕';
+    else if (name.includes('hambur') || name.includes('burger')) icon = '🍔';
+    else if (name.includes('coca') || name.includes('refri') || name.includes('suco')) icon = '🥤';
+    else if (name.includes('marmitex') || name.includes('marmita') || name.includes('prato')) icon = '🍱';
+    else if (name.includes('sorvete') || name.includes('açaí')) icon = '🍦';
+    else if (name.includes('lanche') || name.includes('sanduiche')) icon = '🥪';
+    else if (name.includes('cerveja') || name.includes('bebida')) icon = '🍺';
+    else if (name.includes('doce') || name.includes('sobremesa')) icon = '🧁';
+
+    beautifulMenu += `${icon} *${product.menuName}*\n`;
+    beautifulMenu += `💰 R$ ${product.price.toFixed(2).replace('.', ',')}\n`;
+
+    if (product.menuDescription) {
+      beautifulMenu += `📝 ${product.menuDescription}\n`;
+    }
+
+    // Mostrar opcionais disponíveis de forma resumida
+    if (product.questions && product.questions.length > 0) {
+      const optionalQuestions = product.questions.filter((q: any) => q.minAnswerRequired === 0);
+      const requiredQuestions = product.questions.filter((q: any) => q.minAnswerRequired > 0);
+
+      if (requiredQuestions.length > 0) {
+        beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
+      }
+
+      if (optionalQuestions.length > 0) {
+        beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
+      }
+    }
+
+    beautifulMenu += '\n━━━━━━━━━━━━━━━━━━━━\n\n';
+  });
+
+  beautifulMenu += '📱 *Para fazer seu pedido, digite o nome do produto desejado!*\n\n';
+  beautifulMenu += '💬 Exemplo: "Quero uma pizza margherita" ou "1 marmitex médio"';
+
+  return beautifulMenu;
+}
+
 import { v4 as uuidv4 } from 'uuid';
 import cors from 'cors';
 import {
@@ -1994,29 +2045,25 @@ router.post('/webhook', async (req, res) => {
                   flow: 'CATEGORIES'
                 })
 
-                // Chama o IA com mensagem "cardápio" para iniciar o pedido
-                console.log('Chamando IA com mensagem "cardápio" para iniciar pedido - RETIRADA')
+                // Formatar cardápio bonito e enviar direto
+                console.log('Enviando cardápio formatado para retirada')
 
-                const cardapioMessage = { text: { body: 'cardápio' } };
-                const intent = await classifyUserMessage(cardapioMessage, store, currentConversation.history || '');
+                const beautifulMenu = formatBeautifulMenu(store.menu || []);
 
-                const content = parseAIResponse((intent as any).message?.content);
-                console.log('Resposta da IA para cardápio (retirada):', content);
-
-                // Atualizar histórico com a resposta da IA
+                // Atualizar histórico da conversa
                 await updateConversation(currentConversation, {
                   deliveryOption: 'counter', // Garantir que mantém como retirada
                   flow: 'CATEGORIES',
-                  history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} ${content.message}`
+                  history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente escolheu retirada na loja`
                 });
 
-                // Enviar resposta da IA para o cliente
+                // Enviar cardápio formatado para o cliente
                 if (store.wabaEnvironments) {
                   await sendMessage({
                     messaging_product: 'whatsapp',
                     to: "+" + from,
                     type: 'text',
-                    text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${content.message}` }
+                    text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${beautifulMenu}` }
                   }, store.wabaEnvironments);
                 }
 
@@ -2060,8 +2107,6 @@ router.post('/webhook', async (req, res) => {
                 }
               }
             }
-
-
           }
         }
       });

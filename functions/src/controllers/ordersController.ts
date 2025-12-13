@@ -178,7 +178,8 @@ export const getActiveOrder = async (phoneNumber: string, storeId: string): Prom
       ordersRef,
       where('storeId', '==', storeId.toString()),
       where('phoneNumber', '==', phoneNumber),
-      where('currentFlow.flowId', '<', 4) // Verifica se o flowId é menor que 4
+      where('currentFlow.flowId', '<', 4), // Verifica se o flowId é menor que 4
+      where('createdAt', '>=', today) // Apenas pedidos do dia atual
     );
     const ordersSnapshot = await getDocs(ordersQuery);
 

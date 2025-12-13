@@ -133,7 +133,8 @@ const getActiveOrder = async (phoneNumber, storeId) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Define o início do dia
         const ordersRef = (0, firestore_1.collection)(db, 'Orders');
-        const ordersQuery = (0, firestore_1.query)(ordersRef, (0, firestore_1.where)('storeId', '==', storeId.toString()), (0, firestore_1.where)('phoneNumber', '==', phoneNumber), (0, firestore_1.where)('currentFlow.flowId', '<', 4) // Verifica se o flowId é menor que 4
+        const ordersQuery = (0, firestore_1.query)(ordersRef, (0, firestore_1.where)('storeId', '==', storeId.toString()), (0, firestore_1.where)('phoneNumber', '==', phoneNumber), (0, firestore_1.where)('currentFlow.flowId', '<', 4), // Verifica se o flowId é menor que 4
+        (0, firestore_1.where)('createdAt', '>=', today) // Apenas pedidos do dia atual
         );
         const ordersSnapshot = await (0, firestore_1.getDocs)(ordersQuery);
         console.log('Ordens ativas encontradas:', ordersSnapshot.size, phoneNumber);
