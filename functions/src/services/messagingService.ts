@@ -243,11 +243,3 @@ export function sendWaitingMessage(
     }
   }, wabaEnvironments);
 }
-
-
-
-
-
-
-
-

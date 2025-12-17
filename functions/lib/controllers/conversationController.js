@@ -96,11 +96,32 @@ const updateConversation = async (currentConversation, updates) => {
     }
     const conversationDocRef = (0, firestore_1.doc)(db, 'Conversations', currentConversation?.docId);
     try {
-        // Adicionar o campo `date` com a data/hora atual
+        // Função para remover campos undefined (Firestore não aceita undefined)
+        const removeUndefined = (obj) => {
+            if (obj === null || obj === undefined) {
+                return null;
+            }
+            if (Array.isArray(obj)) {
+                return obj.map(removeUndefined);
+            }
+            if (typeof obj === 'object') {
+                const cleaned = {};
+                for (const key in obj) {
+                    if (obj[key] !== undefined) {
+                        cleaned[key] = removeUndefined(obj[key]);
+                    }
+                }
+                return cleaned;
+            }
+            return obj;
+        };
+        // Limpar undefined dos updates e adicionar o campo `date`
+        const cleanedUpdates = removeUndefined(updates);
         const updatesWithDate = {
-            ...updates,
+            ...cleanedUpdates,
             date: new Date(), // Atualiza o campo `date` com a data/hora atual
         };
+        console.log('Atualizando conversa com dados limpos:', updatesWithDate);
         await (0, firestore_1.updateDoc)(conversationDocRef, updatesWithDate);
         // atualizar currentConversation com os novos dados
         // Atualizar as propriedades do objeto diretamente

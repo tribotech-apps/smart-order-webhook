@@ -33,12 +33,14 @@ export type ConversationFlow =
   'FLOW_STARTED' |
   'COLLECT_PRODUCT_LIST_ITEM' |
   'PRODUCT_SELECTION' |
-  'CATEGORY_SELECTION';
+  'CATEGORY_SELECTION' |
+  'ORDER_REFINMENT' |
+  'ORDER_REFINMENT_CONFIRMATION';
 
-export type ConversationStage = 
-  'Normal' | 
-  'Informando Endereco' | 
-  'Validando Resultados' | 
+export type ConversationStage =
+  'Normal' |
+  'Informando Endereco' |
+  'Validando Resultados' |
   'Endereco Confirmado';
 
 export interface Conversation {
@@ -52,12 +54,12 @@ export interface Conversation {
   address?: Address;
   category?: StoreCategory;
   products?: ShoppingCartItem[];
-  product?: ShoppingCartItem;
+  product?: ShoppingCartItem | null;
   store?: Store;
   currentPage?: number;
   productId?: number;
   quantity?: number;
-  currentQuestionIndex?: number;
+  currentQuestionIndex?: number | null;
   totalPrice?: number;
   questions?: MenuItemQuestion[];
   isLocked?: boolean;
@@ -80,4 +82,41 @@ export interface Conversation {
   history?: string;
   historyAction?: string;
   historyItems?: any[];
+  refinmentItems?: ExtractionResult
+  lastMessage?: string;
+  pendingAnswerConfirmation?: {
+    questionIndex: number;
+    selectedAnswer?: any; // mantém compatibilidade com código antigo
+    selectedAnswers?: any[]; // nova funcionalidade para múltiplas respostas
+  } | null;
+  pendingProductsQueue?: ResolvedItem[]; // fila de produtos que ainda precisam ter perguntas respondidas
+  currentProcessingProduct?: ResolvedItem | null; // produto atualmente sendo processado
+}
+
+export interface ResolvedItem {
+  menuId: number;
+  menuName: string;
+  quantity: number;
+  palavra: string;
+  price: number;
+}
+
+export interface AmbiguousItems {
+  menuId: number;
+  menuName: string;
+  price: number;
+  refining?: boolean;
+}
+
+export interface AmbiguityGroup {
+  id: string;                    // ID único para controle no bot
+  palavra: string;               // O que o cliente disse (ex: "marmitas", "cocas")
+  quantity: number;
+  refining?: boolean;
+  items: AmbiguousItems[];
+}
+
+export interface ExtractionResult {
+  items: ResolvedItem[];
+  ambiguidades: AmbiguityGroup[];
 }
