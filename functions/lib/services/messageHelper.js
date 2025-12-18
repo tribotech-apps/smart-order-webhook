@@ -42,7 +42,13 @@ Responda SEMPRE com JSON válido no formato exato abaixo. Nunca adicione texto e
     "newQuantity": number (opcional, se for alteração de quantidade),
     "action": "increase" | "decrease" | "set" (opcional),
     "newProduct": string (opcional, se for troca)
-  }
+  },
+  "items": [
+    {
+      "menuId": number,
+      "quantity": number
+    }
+  ] (OBRIGATÓRIO se intent = "remove_product" - array com menuId e quantity dos itens a serem removidos do pedido atual)
 }
 
 Regras de classificação (priorize na ordem):
@@ -59,11 +65,34 @@ Regras de classificação (priorize na ordem):
 
 - "replace_product": trocar um produto ("troca o frango por bife", "em vez da coca quero guaraná").
 
-- "remove_product": remover algo ("tira a coca", "remove o sorvete", "não quero mais isso").
+- "remove_product": remover algo ("cancela a coca", "tira o marmitex pequeno", "remove o sorvete", "não quero mais isso"). IMPORTANTE: Quando for remove_product, você DEVE identificar quais itens específicos do pedido atual devem ser removidos e incluir no array "items" com menuId e quantity exatos.
 
 - "other": qualquer outra coisa.
 
 Pedido atual (para contexto): {currentOrder}
+
+EXEMPLOS PARA REMOVE_PRODUCT:
+
+Cliente: "quero remover 2 cocas"
+Pedido atual: [{"menuId": 5, "menuName": "Coca Cola", "quantity": 3}, {"menuId": 10, "menuName": "Pizza", "quantity": 1}]
+Resposta: {
+  "intent": "remove_product",
+  "items": [{"menuId": 5, "quantity": 2}]
+}
+
+Cliente: "cancela o marmitex pequeno"  
+Pedido atual: [{"menuId": 1, "menuName": "Marmitex Pequeno", "quantity": 1}, {"menuId": 5, "menuName": "Coca Cola", "quantity": 2}]
+Resposta: {
+  "intent": "remove_product", 
+  "items": [{"menuId": 1, "quantity": 1}]
+}
+
+Cliente: "remove tudo"
+Pedido atual: [{"menuId": 1, "menuName": "Marmitex", "quantity": 2}, {"menuId": 5, "menuName": "Coca", "quantity": 1}]
+Resposta: {
+  "intent": "remove_product",
+  "items": [{"menuId": 1, "quantity": 2}, {"menuId": 5, "quantity": 1}]
+}
 `;
 const openai = new openai_1.default({ apiKey: process.env.OPENAI_API_KEY });
 // Função de fallback para matching simples quando OpenAI falha

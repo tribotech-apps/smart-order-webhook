@@ -351,12 +351,12 @@ router.post('/webhook', async (req, res) => {
                 message.type = 'text'; // Change type to text so it continues in text flow
 
                 // Send confirmation to user that voice was processed
-                await sendMessage({
-                  messaging_product: 'whatsapp',
-                  to: "+" + from,
-                  type: 'text',
-                  text: { body: `🎤 _Entendi: "${transcription}"_` }
-                }, store.wabaEnvironments);
+                // await sendMessage({
+                //   messaging_product: 'whatsapp',
+                //   to: "+" + from,
+                //   type: 'text',
+                //   text: { body: `🎤 _Entendi: "${transcription}"_` }
+                // }, store.wabaEnvironments);
 
               } catch (error) {
                 console.error('❌ Erro ao processar mensagem de voz:', error);

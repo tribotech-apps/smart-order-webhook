@@ -933,14 +933,31 @@ export async function handleIncomingTextMessage(
           return;
         }
 
+
+        const customerIntent = await classifyCustomerIntent(
+          message.text.body,
+          currentConversation.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity }))
+        );
+
+        console.log('Customer intent with existing cart:', customerIntent);
+
+        if (customerIntent.intent === 'want_menu_or_start') {
+
+          const beautifulMenu = formatBeautifulMenu(store.menu || []);
+          // Enviar cardápio formatado para o cliente
+          if (store.wabaEnvironments) {
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: `✅ Segue o nosso cardápio**.\n\n${beautifulMenu}` }
+            }, store.wabaEnvironments);
+          }
+
+          return;
+        }
         // Se já tem itens no carrinho, primeiro verificar se quer finalizar ou adicionar mais
         if (currentConversation.cartItems && currentConversation.cartItems.length > 0) {
-          const customerIntent = await classifyCustomerIntent(
-            message.text.body,
-            currentConversation.cartItems.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity }))
-          );
-
-          console.log('Customer intent with existing cart:', customerIntent);
 
           if (customerIntent.intent === 'close_order') {
             // Cliente quer finalizar pedido - ir para seleção de pagamento
@@ -954,6 +971,74 @@ export async function handleIncomingTextMessage(
               type: 'text',
               text: { body: `💳 **Como você gostaria de pagar?**\n\n1️⃣ PIX\n2️⃣ Cartão de Crédito\n3️⃣ Pagamento na Entrega` }
             }, store.wabaEnvironments);
+
+            return;
+          }
+
+          if (customerIntent.intent === 'remove_product') {
+            console.log('---***---***---', customerIntent.items)
+
+            // Remover itens do carrinho baseado nos customerIntent.items
+            if (customerIntent.items && customerIntent.items.length > 0) {
+              let updatedCartItems = [...(currentConversation.cartItems || [])];
+              let removedItems: string[] = [];
+
+              for (const itemToRemove of customerIntent.items) {
+                // Encontrar o item no carrinho
+                const cartItemIndex = updatedCartItems.findIndex(cartItem => cartItem.menuId === itemToRemove.menuId);
+
+                if (cartItemIndex !== -1) {
+                  const cartItem = updatedCartItems[cartItemIndex];
+                  const quantityToRemove = itemToRemove.quantity;
+
+                  if (cartItem.quantity <= quantityToRemove) {
+                    // Remover completamente se a quantidade for igual ou menor
+                    removedItems.push(`${cartItem.quantity}x ${cartItem.menuName}`);
+                    updatedCartItems.splice(cartItemIndex, 1);
+                  } else {
+                    // Reduzir a quantidade
+                    removedItems.push(`${quantityToRemove}x ${cartItem.menuName}`);
+                    updatedCartItems[cartItemIndex].quantity -= quantityToRemove;
+                  }
+                }
+              }
+
+              // Atualizar a conversa com o carrinho modificado
+              await updateConversation(currentConversation, {
+                cartItems: updatedCartItems
+              });
+
+              // Enviar mensagem de confirmação
+              if (removedItems.length > 0) {
+                const removedItemsList = removedItems.join('\n');
+                let responseMessage = `✅ Itens removidos:\n${removedItemsList}`;
+
+                if (updatedCartItems.length > 0) {
+                  const remainingItems = updatedCartItems.map(item =>
+                    `${item.quantity}x ${item.menuName} - R$ ${(calculateItemTotalPrice(item)).toFixed(2)}`
+                  ).join('\n');
+                  const totalPrice = updatedCartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
+
+                  responseMessage += `\n\n🛒 **Seu carrinho atual:**\n${remainingItems}\n\n💰 **Total: R$ ${totalPrice.toFixed(2)}**\n\nDeseja adicionar mais algum item ou finalizar o pedido?`;
+                } else {
+                  responseMessage += '\n\n🛒 Seu carrinho está vazio agora. Gostaria de adicionar algum item?';
+                }
+
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: responseMessage }
+                }, store.wabaEnvironments);
+              } else {
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: '❌ Não encontrei os itens que você quer remover no seu carrinho.' }
+                }, store.wabaEnvironments);
+              }
+            }
 
             return;
           }
@@ -1674,7 +1759,7 @@ export async function handleIncomingTextMessage(
         const deliveryText = isDelivery ? `🚚 *Entrega:* R$ ${deliveryPrice.toFixed(2)}\n` : '';
         const deliveryLabel = isDelivery ? 'entrega' : 'retirada na loja';
         const addressText = isDelivery ? `📍 *Endereço:* ${deliveryAddress}` : '🏪 *Retirada:* Na loja';
-        
+
         const detailedStoreMessage = `🔔 *NOVO PEDIDO - AGUARDANDO CONFIRMAÇÃO* (${deliveryLabel})\n\n` +
           `📋 *Pedido:* #${newOrder.id}\n` +
           `👤 *Cliente:* ${customerName}\n` +
@@ -1696,7 +1781,7 @@ export async function handleIncomingTextMessage(
 
         // Mensagem para o cliente
         const customerAddressText = isDelivery ? `📍 *Endereço de Entrega:* ${deliveryAddress}` : '🏪 *Retirada:* Na loja';
-        
+
         const customerMessage = `✅ *Pedido Confirmado!* (${deliveryLabel})\n\n` +
           `📋 *Número do Pedido:* #${newOrder.id}\n` +
           `🛒 *Resumo:*\n${itemsSummary}\n\n` +
