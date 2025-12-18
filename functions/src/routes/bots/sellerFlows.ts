@@ -491,14 +491,14 @@ router.post('/webhook', async (req, res) => {
                       messaging_product: 'whatsapp',
                       to: "+" + from,
                       type: 'text',
-                      text: { body: `✅ Perfeito! Segue nosso cardápio**.\n\n${beautifulMenu}` }
+                      text: { body: `✅Segue nosso cardápio**.\n\n${beautifulMenu}` }
                     }, store.wabaEnvironments);
                   }
 
                   // Save message in conversartions
-                  await updateConversation(currentConversation, {
-                    flow: 'CATEGORIES'
-                  })
+                  // await updateConversation(currentConversation, {
+                  //   flow: 'CATEGORIES'
+                  // })
 
                   break;
                 case "ordering_products":

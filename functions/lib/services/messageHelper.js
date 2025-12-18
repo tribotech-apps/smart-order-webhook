@@ -427,19 +427,29 @@ EXEMPLOS DE AMBIGUIDADE OBRIGATÓRIA:
 EXEMPLOS SEM AMBIGUIDADE (items diretos):
 - "marmitex grande" + existe "Marmitex Grande" → ITEM DIRETO
 - "coca lata" + existe "Coca Lata" → ITEM DIRETO  
+- "guaraná" + existe apenas "Guaraná Lata" → ITEM DIRETO (matching inteligente)
+- "sorvete" + existe apenas "Sorvete" → ITEM DIRETO (matching exato)
+- "bolo" + existe apenas "Bolo Aniversário" → ITEM DIRETO (matching por palavra-chave)
 - "uma pequena e uma média" → 2 ITEMS: [1x "Marmitex Pequeno", 1x "Marmitex Médio"]
 - "duas marmitas pequenas" → 1 ITEM: [2x "Marmitex Pequeno"]
-- Existe apenas 1 produto no cardápio que combina → ITEM DIRETO
+- Existe apenas 1 produto no cardápio que combina → SEMPRE ITEM DIRETO
 
 CARDÁPIO DISPONÍVEL:
 ${JSON.stringify(cardapio, null, 2)}
 
 ALGORITMO OBRIGATÓRIO:
 1. Para cada palavra do cliente, encontre TODOS os produtos com nomes similares
-2. Se encontrar 2+ produtos similares para mesma palavra → OBRIGATÓRIO usar ambiguidades
-3. Se encontrar EXATAMENTE 1 produto que combina → items
-4. Se encontrar 0 produtos → ignorar
-5. NUNCA misture: uma palavra vai para items OU ambiguidades, nunca ambos
+2. MATCHING INTELIGENTE: "guaraná" combina com "Guaraná Lata", "coca" combina com "Coca Cola Lata", etc.
+3. Se encontrar 2+ produtos similares para mesma palavra → OBRIGATÓRIO usar ambiguidades
+4. Se encontrar EXATAMENTE 1 produto que combina → items
+5. Se encontrar 0 produtos → ignorar
+6. NUNCA misture: uma palavra vai para items OU ambiguidades, nunca ambos
+
+REGRAS DE MATCHING:
+- Ignore acentos: "guarana" = "guaraná" = "Guaraná"
+- Palavras parciais: "guaraná" combina com "Guaraná Lata"
+- Case insensitive: "GUARANÁ" = "guaraná" = "Guaraná"
+- Seja flexível: "bolo" combina com "Bolo Aniversário"
 
 RESPOSTA EM JSON:
 {
@@ -470,23 +480,29 @@ RESPOSTA EM JSON:
 
 CASOS CRÍTICOS E EXEMPLOS COMPLETOS:
 
-1. AMBIGUIDADES (palavra genérica):
-Cliente: "quero uma marmita" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]
+1. MATCHING SIMPLES (1 opção no cardápio):
+Cliente: "guaraná" + cardápio ["Guaraná Lata"]
+→ items: [{"menuId": 6, "menuName": "Guaraná Lata", "quantity": 1, "palavra": "guaraná", "price": 5.9}]
+
+Cliente: "sorvete" + cardápio ["Sorvete"]  
+→ items: [{"menuId": 4, "menuName": "Sorvete", "quantity": 1, "palavra": "sorvete", "price": 16}]
+
+Cliente: "bolo" + cardápio ["Bolo Aniversário"]
+→ items: [{"menuId": 7, "menuName": "Bolo Aniversário", "quantity": 1, "palavra": "bolo", "price": 32.4}]
+
+2. AMBIGUIDADES (múltiplas opções):
+Cliente: "marmita" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]
 → ambiguidades: [{"palavra": "marmita", "quantity": 1, "items": [todos os 3 tamanhos]}]
 
-2. ITEMS DIRETOS (específicos):
+Cliente: "coca" + cardápio ["Coca Cola Lata", "Coca Cola 1 Litro"]
+→ ambiguidades: [{"palavra": "coca", "quantity": 1, "items": [ambas as cocas]}]
+
+3. ITEMS DIRETOS (específicos):
 Cliente: "uma pequena e uma média" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]  
 → items: [{"menuName": "Marmitex Pequeno", "quantity": 1}, {"menuName": "Marmitex Médio", "quantity": 1}]
 
-Cliente: "duas marmitas, uma pequena e uma média"
-→ items: [{"menuName": "Marmitex Pequeno", "quantity": 1}, {"menuName": "Marmitex Médio", "quantity": 1}]
-
-Cliente: "duas pequenas" 
-→ items: [{"menuName": "Marmitex Pequeno", "quantity": 2}]
-
-3. MÚLTIPLAS PALAVRAS:
-Cliente: "uma marmita e duas cocas" + múltiplas opções para ambos
-→ ambiguidades: [uma para "marmita", outra para "coca"]
+Cliente: "coca lata" + cardápio ["Coca Cola Lata", "Coca Cola 1 Litro"]
+→ items: [{"menuName": "Coca Cola Lata", "quantity": 1}] (específico, não ambíguo)
 
 REGRA DE OURO: Cada tamanho específico (pequeno/médio/grande) = item direto. Palavra genérica = ambiguidade!
 `;
