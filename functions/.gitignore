@@ -1,0 +1,16 @@
+# Firebase Admin SDK
+*firebase-adminsdk*.json
+
+# Google Services
+src/google-services.json
+
+# Environment variables
+.env
+.env.local
+
+# Node modules
+node_modules/
+
+# Build output
+lib/
+dist/
