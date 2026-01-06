@@ -2,12 +2,7 @@ import axios from 'axios';
 import { AxiosHeaders } from 'axios';
 import { Client } from '@googlemaps/google-maps-services-js';
 import { getStore } from '../controllers/storeController';
-import { sendCategoriesMessage } from '../services/catalogService';
-// import { redirectToOrderSummary } from '../services/shoppingService';
-import { updateConversation } from '../controllers/conversationController';
-import { Conversation } from '../types/Conversation';
 import { Store, WABAEnvironments } from '../types/Store';
-import { deleteImageFromWABA, uploadImageToWABA } from './imageService';
 
 const client = new Client({});
 
@@ -18,7 +13,7 @@ export function delay(ms: number): Promise<void> {
 }
 
 export const sendMessage = async (data: Record<string, any>, wabaEnvironments: WABAEnvironments): Promise<any> => {
-
+  console.log('<><><><><><><><><><><>><><><><><><>', JSON.stringify(data))
   const url = `https://graph.facebook.com/${process.env.WABA_VERSION}/${wabaEnvironments.wabaPhoneNumberId}/messages`;
   console.log('wabaEnvironments', wabaEnvironments);
 
@@ -27,10 +22,15 @@ export const sendMessage = async (data: Record<string, any>, wabaEnvironments: W
   headers.set('Authorization', `Bearer ${wabaEnvironments.wabaAccessToken}`);
   headers.set('Content-Type', 'application/json');
 
-  // console.log('Enviando mensagem para o WABA...', url, JSON.stringify(data), headers);
+  console.log('Enviando mensagem para o WABA...', JSON.stringify(data));
 
-  const response = await axios.post(url, data, { headers });
-  return response.data;
+  try {
+    const response = await axios.post(url, data, { headers });
+    return response.data;
+  } catch (e) {
+    console.log('ERROR sendMessage', e)
+    return null;
+  }
 
 };
 
@@ -42,7 +42,6 @@ export const sendWelcomeMessage = async (
   imageUrl?: string,
 ): Promise<void> => {
   try {
-
     await sendMessage({
       recipient_type: 'individual',
       messaging_product: 'whatsapp',

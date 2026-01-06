@@ -438,7 +438,7 @@ async function extractProductsFromMessageWithAI(message, cardapio) {
     const systemPrompt = `
 Você é um assistente especializado em identificar produtos e quantidades em pedidos de delivery.
 
-TAREFA: Analisar a mensagem do cliente e identificar produtos do cardápio, detectando ambiguidades quando necessário.
+TAREFA: Analisar a mensagem do cliente e identificar produtos no cardápio recebido, detectando ambiguidades quando necessário.
 
 REGRAS CRÍTICAS:
 1. IDENTIFICAR CADA PRODUTO MENCIONADO SEPARADAMENTE - se cliente menciona "pequena e média", são 2 produtos DIFERENTES
@@ -447,11 +447,12 @@ REGRAS CRÍTICAS:
 4. NUNCA assumir tamanho quando não especificado
 5. CRITICAL: "uma pequena e uma média" = 2 items separados (1x pequena + 1x média)
 6. CRITICAL: "duas marmitas, uma pequena e uma média" = 2 items (1x pequena + 1x média)
+7. CRITICAL: O produto deve estar contido no cardápio para poder ser indentificado.
 
-EXEMPLOS DE AMBIGUIDADE OBRIGATÓRIA:
-- "marmita" + existe ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"] → AMBIGUIDADE (não items!)
-- "coca" + existe ["Coca Lata", "Coca 2L"] → AMBIGUIDADE (não items!)
-- "pizza" + existe ["Pizza Margherita", "Pizza Portuguesa"] → AMBIGUIDADE (não items!)
+EXEMPLOS DE AMBIGUIDADE OBRIGATÓRIA (baseado no cardápio real):
+- Se cliente disser palavra genérica E existirem múltiplas opções no cardápio → AMBIGUIDADE
+- Se cliente disser palavra específica E existir exatamente 1 opção no cardápio → ITEM DIRETO  
+- Se cliente disser qualquer palavra E NÃO existir NENHUMA opção no cardápio → IGNORAR COMPLETAMENTE
 
 EXEMPLOS SEM AMBIGUIDADE (items diretos):
 - "marmitex grande" + existe "Marmitex Grande" → ITEM DIRETO
@@ -463,22 +464,35 @@ EXEMPLOS SEM AMBIGUIDADE (items diretos):
 - "duas marmitas pequenas" → 1 ITEM: [2x "Marmitex Pequeno"]
 - Existe apenas 1 produto no cardápio que combina → SEMPRE ITEM DIRETO
 
+REGRA FUNDAMENTAL: ANALISE APENAS PROTUDOS CONTIDOS NO CARDÁPIO FORNECIDO ABAIXO! 
+
 CARDÁPIO DISPONÍVEL:
 ${JSON.stringify(cardapio, null, 2)}
 
 ALGORITMO OBRIGATÓRIO:
-1. Para cada palavra do cliente, encontre TODOS os produtos com nomes similares
-2. MATCHING INTELIGENTE: "guaraná" combina com "Guaraná Lata", "coca" combina com "Coca Cola Lata", etc.
-3. Se encontrar 2+ produtos similares para mesma palavra → OBRIGATÓRIO usar ambiguidades
-4. Se encontrar EXATAMENTE 1 produto que combina → items
-5. Se encontrar 0 produtos → ignorar
-6. NUNCA misture: uma palavra vai para items OU ambiguidades, nunca ambos
+1. Para cada palavra/frase do cliente, procure no cardápio fornecido por produtos com nomes similares
+2. PREPROCESSING DE FRASES: 
+   - "sorvete de chocolate/morango/baunilha" → procure por "sorvete sabores"
+   - "pizza de mussarela/calabresa" → procure por "pizza sabores"  
+   - Remova o sabor específico e procure pelo produto base + "sabores"
+3. MATCHING INTELIGENTE: ignore acentos, case, palavras parciais
+4. DECISÃO BASEADA NO QUE ENCONTRAR:
+   - 0 produtos no cardápio = IGNORAR COMPLETAMENTE (não retornar nada)
+   - 1 produto no cardápio = ITEM DIRETO (NUNCA ambiguidade)
+   - 2+ produtos no cardápio = AMBIGUIDADE OBRIGATÓRIA (apenas quando há múltiplas opções)
+5. NUNCA criar ambiguidades ou items para produtos que NÃO EXISTEM no cardápio fornecido
+6. NUNCA misture: uma palavra vai para items OU ambiguidades OU é ignorada, nunca combinações
 
 REGRAS DE MATCHING:
 - Ignore acentos: "guarana" = "guaraná" = "Guaraná"
 - Palavras parciais: "guaraná" combina com "Guaraná Lata"
 - Case insensitive: "GUARANÁ" = "guaraná" = "Guaraná"
 - Seja flexível: "bolo" combina com "Bolo Aniversário"
+- PRODUTOS COM SABORES/OPCIONAIS: 
+  - "sorvete de chocolate" → "Sorvete Sabores" (ignore o sabor, foque no produto base)
+  - "pizza de mussarela" → "Pizza Sabores" (ignore o sabor, foque no produto base)
+  - "hambúrguer de frango" → "Hambúrguer Sabores" (ignore o sabor, foque no produto base)
+  - Quando cliente menciona PRODUTO + DE + SABOR, procure por "PRODUTO Sabores"
 
 RESPOSTA EM JSON:
 {
@@ -513,18 +527,22 @@ CASOS CRÍTICOS E EXEMPLOS COMPLETOS:
 Cliente: "guaraná" + cardápio ["Guaraná Lata"]
 → items: [{"menuId": 6, "menuName": "Guaraná Lata", "quantity": 1, "palavra": "guaraná", "price": 5.9}]
 
-Cliente: "sorvete" + cardápio ["Sorvete"]  
-→ items: [{"menuId": 4, "menuName": "Sorvete", "quantity": 1, "palavra": "sorvete", "price": 16}]
+Cliente: "sorvete de chocolate" + cardápio ["Sorvete Sabores"]
+→ items: [{"menuId": 8, "menuName": "Sorvete Sabores", "quantity": 1, "palavra": "sorvete de chocolate", "price": 12.0}]
 
-Cliente: "bolo" + cardápio ["Bolo Aniversário"]
-→ items: [{"menuId": 7, "menuName": "Bolo Aniversário", "quantity": 1, "palavra": "bolo", "price": 32.4}]
-
-2. AMBIGUIDADES (múltiplas opções):
+2. AMBIGUIDADES (múltiplas opções no cardápio):
 Cliente: "marmita" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]
 → ambiguidades: [{"palavra": "marmita", "quantity": 1, "items": [todos os 3 tamanhos]}]
 
-Cliente: "coca" + cardápio ["Coca Cola Lata", "Coca Cola 1 Litro"]
-→ ambiguidades: [{"palavra": "coca", "quantity": 1, "items": [ambas as cocas]}]
+3. PRODUTOS INEXISTENTES (IGNORAR COMPLETAMENTE):
+Cliente: "pizza de mussarela" + cardápio ["Marmitex Pequeno", "Guaraná Lata", "Sorvete"]
+→ items: [], ambiguidades: [] (pizza não existe no cardápio = IGNORAR)
+
+Cliente: "hambúrguer" + cardápio ["Marmitex Pequeno", "Guaraná Lata"]  
+→ items: [], ambiguidades: [] (hambúrguer não existe no cardápio = IGNORAR)
+
+Cliente: "sushi de salmão" + cardápio ["Marmitex Pequeno", "Guaraná Lata"]
+→ items: [], ambiguidades: [] (sushi não existe no cardápio = IGNORAR)
 
 3. ITEMS DIRETOS (específicos):
 Cliente: "uma pequena e uma média" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]  
@@ -533,7 +551,13 @@ Cliente: "uma pequena e uma média" + cardápio ["Marmitex Pequeno", "Marmitex M
 Cliente: "coca lata" + cardápio ["Coca Cola Lata", "Coca Cola 1 Litro"]
 → items: [{"menuName": "Coca Cola Lata", "quantity": 1}] (específico, não ambíguo)
 
-REGRA DE OURO: Cada tamanho específico (pequeno/médio/grande) = item direto. Palavra genérica = ambiguidade!
+REGRA DE OURO: 
+- Só retorne produtos que EXISTEM no cardápio fornecido
+- Produtos inexistentes no cardápio = IGNORAR COMPLETAMENTE (não retornar)  
+- 1 produto encontrado = SEMPRE item direto (NUNCA ambiguidade)
+- 2+ produtos encontrados = ambiguidade obrigatória
+- Ambiguidades com apenas 1 item são ERRO - deve ser item direto
+- JAMAIS invente ou assuma produtos que não estão no cardápio JSON fornecido
 `;
     try {
         const response = await openai.chat.completions.create({
@@ -557,6 +581,27 @@ REGRA DE OURO: Cada tamanho específico (pequeno/médio/grande) = item direto. P
             ...amb,
             id: amb.id || `amb_${(0, uuid_1.v4)().split('-')[0]}`
         }));
+        // Pós-processamento: converter ambiguidades de 1 item em items diretos
+        const ambiguidadesReais = [];
+        result.ambiguidades.forEach((ambiguidade) => {
+            if (ambiguidade.items && ambiguidade.items.length === 1) {
+                // Se há apenas 1 item na ambiguidade, não é ambiguidade - mover para items
+                const item = ambiguidade.items[0];
+                result.items.push({
+                    menuId: item.menuId,
+                    menuName: item.menuName,
+                    quantity: ambiguidade.quantity || 1,
+                    palavra: ambiguidade.palavra,
+                    price: item.price
+                });
+            }
+            else if (ambiguidade.items && ambiguidade.items.length > 1) {
+                // Manter apenas ambiguidades reais (2+ items)
+                ambiguidadesReais.push(ambiguidade);
+            }
+        });
+        // Atualizar o resultado com apenas as ambiguidades reais
+        result.ambiguidades = ambiguidadesReais;
         return result;
     }
     catch (error) {
@@ -567,37 +612,71 @@ REGRA DE OURO: Cada tamanho específico (pequeno/médio/grande) = item direto. P
 }
 /**
  * Identifica método de pagamento escolhido pelo cliente usando IA
+ * Também detecta se o cliente quer alterar o pedido ao invés de escolher pagamento
  */
 async function identifyPaymentMethod(userResponse) {
     const systemPrompt = `Você é um assistente especializado em identificar métodos de pagamento escolhidos por clientes.
 
-TAREFA: Analisar a resposta do cliente e identificar qual método de pagamento ele escolheu.
+TAREFA DUPLA: 
+1. Identificar qual método de pagamento ele escolheu OU
+2. Detectar se ele quer ALTERAR O PEDIDO ao invés de escolher pagamento
 
-OPÇÕES DISPONÍVEIS:
+OPÇÕES DE PAGAMENTO DISPONÍVEIS:
 1. PIX - Pagamento via PIX
-2. CARTÃO DE CRÉDITO - Pagamento com cartão na entrega
+2. CARTÃO DE CRÉDITO - Pagamento com cartão na entrega  
 3. PAGAMENTO NA ENTREGA - Dinheiro na entrega
 
 RESPONDA EM JSON:
 {
   "method": "PIX" | "CREDIT_CARD" | "DELIVERY" | null,
   "confidence": number (0-100),
+  "wantsToChangeOrder": boolean,
+  "changeOrderReason": "string (se wantsToChangeOrder for true)",
   "reasoning": "string explicando a decisão"
 }
 
-REGRAS:
-- Se mencionar "pix", "PIX", "1", "primeira opção" → PIX
-- Se mencionar "cartão", "cartao", "crédito", "credito", "2", "segunda opção" → CREDIT_CARD  
-- Se mencionar "dinheiro", "entrega", "3", "terceira opção" → DELIVERY
-- Se não conseguir identificar claramente → null
-- Confidence: 90-100 (muito claro), 70-89 (claro), 50-69 (provável), <50 (incerto)
+REGRAS PARA PAGAMENTO:
+- Se mencionar "pix", "PIX", "Pix", "pixe", "piks", "pick", "1", "peace", "peas", "pis", "primeira", "primeira opção", "opção 1", "numero 1" → PIX
+- Se mencionar "cartão", "cartao", "crédito", "credito", "card", "2", "segunda", "segunda opção", "opção 2", "numero 2" → CREDIT_CARD  
+- Se mencionar "dinheiro", "entrega", "cash", "à vista", "3", "terceira", "terceira opção", "opção 3", "numero 3" → DELIVERY
 
-EXEMPLOS:
-Cliente: "PIX" → {"method": "PIX", "confidence": 95, "reasoning": "menciona PIX diretamente"}
-Cliente: "1" → {"method": "PIX", "confidence": 90, "reasoning": "escolheu opção 1 que é PIX"}
-Cliente: "quero pagar com cartão" → {"method": "CREDIT_CARD", "confidence": 90, "reasoning": "menciona cartão"}
-Cliente: "dinheiro na hora" → {"method": "DELIVERY", "confidence": 85, "reasoning": "indica pagamento em dinheiro na entrega"}
-Cliente: "não sei" → {"method": null, "confidence": 10, "reasoning": "resposta ambígua"}
+REGRAS PARA ALTERAÇÃO DE PEDIDO (PRIORIDADE MÁXIMA):
+- Se mencionar adicionar/incluir produtos → wantsToChangeOrder: true
+- Se mencionar remover/tirar/cancelar produtos → wantsToChangeOrder: true  
+- Se mencionar trocar/alterar produtos → wantsToChangeOrder: true
+- Se mencionar quantidade (mais, menos, aumentar, diminuir) → wantsToChangeOrder: true
+- Se mencionar nomes de produtos → wantsToChangeOrder: true
+- Se disser "não" seguido de alteração → wantsToChangeOrder: true
+- Se falar "antes de pagar" ou "primeiro" → wantsToChangeOrder: true
+
+EXEMPLOS DE PAGAMENTO:
+Cliente: "PIX" → {"method": "PIX", "confidence": 95, "wantsToChangeOrder": false, "reasoning": "menciona PIX diretamente"}
+Cliente: "pix" → {"method": "PIX", "confidence": 95, "wantsToChangeOrder": false, "reasoning": "menciona pix minúsculo"}
+Cliente: "Pix" → {"method": "PIX", "confidence": 95, "wantsToChangeOrder": false, "reasoning": "menciona Pix capitalizado"}
+Cliente: "pixe" → {"method": "PIX", "confidence": 85, "wantsToChangeOrder": false, "reasoning": "variação de escrita de PIX"}
+Cliente: "1" → {"method": "PIX", "confidence": 90, "wantsToChangeOrder": false, "reasoning": "escolheu opção 1"}
+Cliente: "primeira" → {"method": "PIX", "confidence": 90, "wantsToChangeOrder": false, "reasoning": "escolheu primeira opção"}
+Cliente: "opção 1" → {"method": "PIX", "confidence": 90, "wantsToChangeOrder": false, "reasoning": "escolheu opção 1"}
+Cliente: "vou de pix" → {"method": "PIX", "confidence": 95, "wantsToChangeOrder": false, "reasoning": "confirmou pagamento via PIX"}
+Cliente: "pode ser pix" → {"method": "PIX", "confidence": 90, "wantsToChangeOrder": false, "reasoning": "aceitou pagamento via PIX"}
+
+EXEMPLOS DE ALTERAÇÃO DE PEDIDO:
+Cliente: "quero incluir uma coca" → {"method": null, "confidence": 0, "wantsToChangeOrder": true, "changeOrderReason": "quer incluir produto", "reasoning": "quer alterar pedido antes do pagamento"}
+Cliente: "pode tirar o sorvete?" → {"method": null, "confidence": 0, "wantsToChangeOrder": true, "changeOrderReason": "quer remover produto", "reasoning": "quer remover item do pedido"}
+Cliente: "não, quero adicionar mais uma marmita" → {"method": null, "confidence": 0, "wantsToChangeOrder": true, "changeOrderReason": "quer adicionar produto", "reasoning": "rejeitou pagamento para alterar pedido"}
+Cliente: "antes de pagar, posso trocar o tamanho?" → {"method": null, "confidence": 0, "wantsToChangeOrder": true, "changeOrderReason": "quer trocar produto", "reasoning": "quer alterar antes do pagamento"}
+Cliente: "mais uma coca cola" → {"method": null, "confidence": 0, "wantsToChangeOrder": true, "changeOrderReason": "quer adicionar produto", "reasoning": "quer adicionar mais itens"}
+
+VARIAÇÕES COMUNS DE PIX (todas devem ser identificadas como PIX):
+- "pix", "PIX", "Pix", "PIx", "pIX" 
+- "pixe", "piks", "pick" (erros de digitação)
+- "vou de pix", "quero pix", "pode ser pix", "prefiro pix"
+- "pix mesmo", "pix por favor", "vamos de pix"
+- "1", "primeira", "primeira opção", "opção 1", "numero 1"
+
+IMPORTANTE: Se detectar QUALQUER intenção de alterar pedido, sempre retorne wantsToChangeOrder: true e method: null.
+
+ATENÇÃO: Seja MUITO permissivo com variações de PIX. Qualquer palavra que lembre PIX deve ser identificada como PIX.
 
 Retorne APENAS o JSON, sem texto adicional.`;
     try {
@@ -615,12 +694,14 @@ Retorne APENAS o JSON, sem texto adicional.`;
         console.log(`💳 IA identificou pagamento para "${userResponse}":`, parsed);
         return {
             method: parsed.method || null,
-            confidence: parsed.confidence || 0
+            confidence: parsed.confidence || 0,
+            wantsToChangeOrder: parsed.wantsToChangeOrder || false,
+            changeOrderReason: parsed.changeOrderReason
         };
     }
     catch (error) {
         console.error('Erro ao identificar método de pagamento:', error);
-        return { method: null, confidence: 0 };
+        return { method: null, confidence: 0, wantsToChangeOrder: false };
     }
 }
 /**

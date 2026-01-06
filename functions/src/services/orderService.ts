@@ -2,6 +2,7 @@ import { updateConversation } from '../controllers/conversationController';
 import { sendAddressConfirmation, sendNewAddressMessage } from '../services/addressService';
 import { notifyAdmin, sendMessage } from '../services/messagingService';
 import { Conversation } from '../types/Conversation';
+import { MenuItem, Weekday } from '../types/Store';
 
 export async function handleMakeOrder(
   from: string,
@@ -125,3 +126,30 @@ export async function handleBuySingleProduct(
     }
   }
 }
+
+// Função para filtrar menu baseado no dia da semana
+export function filterMenuByWeekday(menu: MenuItem[]): MenuItem[] {
+  const today = new Date();
+  const currentWeekday = today.getDay() === 0 ? 7 : today.getDay() as Weekday; // Domingo=7, Segunda=1, ..., Sábado=6
+
+  return menu.filter(item => {
+    // Se allDays é true, item está sempre disponível
+    if (item.allDays) {
+      return true;
+    }
+
+
+    console.log('---()---', item.weekdays)
+
+    // Se allDays é false, verificar se o dia atual está no array weekdays
+    if (item.weekdays && Array.isArray(item.weekdays)) {
+      console.log('---$$$$$$$$$$$$---', item.weekdays.includes(currentWeekday))
+
+      return item.weekdays.includes(currentWeekday);
+    }
+
+    // Se allDays é false mas não tem weekdays definido, não mostrar o item
+    return false;
+  });
+}
+

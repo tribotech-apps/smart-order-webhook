@@ -16,15 +16,22 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 const sendMessage = async (data, wabaEnvironments) => {
+    console.log('<><><><><><><><><><><>><><><><><><>', JSON.stringify(data));
     const url = `https://graph.facebook.com/${process.env.WABA_VERSION}/${wabaEnvironments.wabaPhoneNumberId}/messages`;
     console.log('wabaEnvironments', wabaEnvironments);
     // Criar os cabeçalhos corretamente
     const headers = new axios_2.AxiosHeaders();
     headers.set('Authorization', `Bearer ${wabaEnvironments.wabaAccessToken}`);
     headers.set('Content-Type', 'application/json');
-    // console.log('Enviando mensagem para o WABA...', url, JSON.stringify(data), headers);
-    const response = await axios_1.default.post(url, data, { headers });
-    return response.data;
+    console.log('Enviando mensagem para o WABA...', JSON.stringify(data));
+    try {
+        const response = await axios_1.default.post(url, data, { headers });
+        return response.data;
+    }
+    catch (e) {
+        console.log('ERROR sendMessage', e);
+        return null;
+    }
 };
 exports.sendMessage = sendMessage;
 const sendWelcomeMessage = async (phoneNumber, flowToken, wabaEnvironments, store, imageUrl) => {

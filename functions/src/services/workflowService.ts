@@ -154,11 +154,11 @@ export class WorkflowService {
       // Após sucesso da transação, lidar com alertas
       if (toFlowId <= 3 && !cancel) {
         // Para estágios 1, 2, 3: agendar novos alertas
-        await OrderAlertScheduler.handleStageChange(orderId, toFlowId, storeId, result.orderData.createdAt.toDate());
+        // await OrderAlertScheduler.handleStageChange(orderId, toFlowId, storeId, result.orderData.createdAt.toDate());
       } else if (toFlowId >= 4 || cancel) {
         // Para estágio 4 (entregue), 5 (cancelada) ou qualquer cancelamento: cancelar todas as tasks
         console.log(`🗑️ [WORKFLOW_SERVICE] Order ${orderId} moved to final stage ${toFlowId} or cancelled, cancelling all pending tasks...`);
-        await OrderAlertScheduler.cancelOrderTasks(orderId);
+        // await OrderAlertScheduler.cancelOrderTasks(orderId);
         console.log(`✅ [WORKFLOW_SERVICE] All tasks cancelled for order ${orderId}`);
       }
 
@@ -253,10 +253,10 @@ export class WorkflowService {
    * Envia WhatsApp para o cliente informando mudança de estágio
    */
   private async sendCustomerWhatsAppUpdate(
-    orderData: any, 
-    fromFlowId: number, 
-    toFlowId: number, 
-    cancel: boolean, 
+    orderData: any,
+    fromFlowId: number,
+    toFlowId: number,
+    cancel: boolean,
     storeId: string
   ): Promise<void> {
     try {
@@ -270,9 +270,9 @@ export class WorkflowService {
       // Buscar dados da store para WABA
       console.log(`🏪 [CUSTOMER_WHATSAPP] Getting store data for storeId: ${storeId}`);
       const store = await getStoreById(storeId);
-      
+
       console.log(`🏪 [CUSTOMER_WHATSAPP] Store found:`, !!store, store?.wabaEnvironments ? 'has WABA' : 'no WABA');
-      
+
       if (!store?.wabaEnvironments) {
         console.log(`📱 [CUSTOMER_WHATSAPP] Store ${storeId} has no WABA config`);
         return;
@@ -280,7 +280,7 @@ export class WorkflowService {
 
       // Determinar mensagem baseada na transição
       let messageText = '';
-      
+
       if (cancel || toFlowId === 5) {
         messageText = `❌ Seu pedido #${orderData.id} foi cancelado. Entre em contato conosco se tiver dúvidas.`;
       } else {
@@ -479,14 +479,14 @@ export class WorkflowService {
       });
 
       // Cancelar todas as tasks pendentes
-      console.log(`🗑️ [WORKFLOW_SERVICE] Cancelling all pending tasks for cancelled order ${orderId}...`);
-      await OrderAlertScheduler.cancelOrderTasks(orderId);
-      
+      // console.log(`🗑️ [WORKFLOW_SERVICE] Cancelling all pending tasks for cancelled order ${orderId}...`);
+      // await OrderAlertScheduler.cancelOrderTasks(orderId);
+
       // Enviar notificações de cancelamento
-      await Promise.all([
-        this.sendCancellationMessages(orderData, reason),
-        notificationService.notifyOrderCancelled(orderId, storeId, reason)
-      ]);
+      // await Promise.all([
+      //   this.sendCancellationMessages(orderData, reason),
+      //   notificationService.notifyOrderCancelled(orderId, storeId, reason)
+      // ]);
 
       console.log(`Order ${orderId} cancelled successfully`);
       return true;

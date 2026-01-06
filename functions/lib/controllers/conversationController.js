@@ -9,7 +9,7 @@ const getRecentConversation = async (phoneNumber, storeId) => {
     const conversationsRef = (0, firestore_1.collection)(db, 'Conversations'); // Substitua 'conversations' pelo nome da sua coleção
     // console.log('Buscando conversa mais recente para o número:', phoneNumber, storeId);
     // Calcular a data/hora atual menos 5 minutos
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const minutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     // Verificar se o número de telefone não contém o símbolo '+', adicionando-o se necessário
     if (!phoneNumber.startsWith('+')) {
         // console.log(`Número de telefone ajustado para incluir '+': ${phoneNumber}`);
@@ -17,7 +17,7 @@ const getRecentConversation = async (phoneNumber, storeId) => {
     }
     // console.log('Customer Phone Number:', phoneNumber);
     // Criar a query para buscar o documento mais recente
-    const q = (0, firestore_1.query)(conversationsRef, (0, firestore_1.where)('phoneNumber', '==', phoneNumber), (0, firestore_1.where)('date', '>=', tenMinutesAgo), (0, firestore_1.where)('store._id', '==', storeId), (0, firestore_1.orderBy)('date', 'desc'), (0, firestore_1.limit)(1));
+    const q = (0, firestore_1.query)(conversationsRef, (0, firestore_1.where)('phoneNumber', '==', phoneNumber), (0, firestore_1.where)('date', '>=', minutesAgo), (0, firestore_1.where)('store._id', '==', storeId), (0, firestore_1.orderBy)('date', 'desc'), (0, firestore_1.limit)(1));
     // Executar a query
     const querySnapshot = await (0, firestore_1.getDocs)(q);
     // Retornar o documento mais recente, se existir

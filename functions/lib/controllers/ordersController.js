@@ -10,7 +10,6 @@ const Order_1 = require("../types/Order");
 const userController_1 = require("../controllers/userController");
 const storeController_1 = require("./storeController");
 const messagingService_1 = require("../services/messagingService");
-const orderAlertScheduler_1 = require("../services/orderAlertScheduler");
 const db = (0, firestore_1.getFirestore)(firebase_1.default);
 const getUserPendingOrders = async ({ uid }) => {
     try {
@@ -39,7 +38,7 @@ exports.getUserPendingOrders = getUserPendingOrders;
  * @param conversation Dados da conversa.
  * @param paymentId ID do pagamento gerado (ex.: ID do Pagar.me).
  */
-const createOrder = async (conversation, paymentId) => {
+const createOrder = async (conversation, paymentId, storeId) => {
     try {
         if (!conversation.store?.slug?.trim()) {
             // TODO: handle
@@ -59,7 +58,7 @@ const createOrder = async (conversation, paymentId) => {
             conversation.phoneNumber = `+${conversation.phoneNumber}`;
         }
         // Garantir que o usuário exista
-        const userUid = await (0, userController_1.ensureUserExists)(conversation.customerName, conversation.phoneNumber, conversation.address);
+        const userUid = await (0, userController_1.ensureUserExists)(conversation.customerName, conversation.phoneNumber, conversation.address, storeId);
         console.log('Usuário garantido. Prosseguindo com a criação do pedido.');
         // Get store
         const store = await (0, storeController_1.getStore)(conversation.store.slug.trim());
@@ -101,20 +100,30 @@ const createOrder = async (conversation, paymentId) => {
         const docRef = await (0, firestore_1.addDoc)((0, firestore_1.collection)(db, 'Orders'), order);
         const orderId = docRef.id;
         console.log('Pedido criado com sucesso no Firestore:', order);
-        // Agendar alertas do estágio 1 (fila) usando Firebase Scheduler
-        console.log(`🔔 PREPARING TO SCHEDULE ALERTS - orderId: ${orderId}, storeId: ${store._id}, rowTime: ${store.rowTime}`);
-        if (store && order.createdAt) {
-            console.log(`🚀 CALLING OrderAlertScheduler.scheduleStageAlerts...`);
-            await orderAlertScheduler_1.OrderAlertScheduler.scheduleStageAlerts(order.id, 1, store._id, order.createdAt.toDate(), store.rowTime);
-            console.log(`✅ scheduleStageAlerts call completed for pedido ${orderId}`);
-            // Enviar notificações WhatsApp quando pedido for criado (estágio 1)
-            console.log(`📱 CALLING OrderAlertScheduler.handleStageChange for WhatsApp notifications...`);
-            await orderAlertScheduler_1.OrderAlertScheduler.handleStageChange(order.id, 1, store._id, order.createdAt.toDate());
-            console.log(`✅ handleStageChange call completed for pedido ${orderId}`);
-        }
-        else {
-            console.log(`❌ NOT SCHEDULING ALERTS - store: ${!!store}, createdAt: ${!!order.createdAt}`);
-        }
+        // // Agendar alertas do estágio 1 (fila) usando Firebase Scheduler
+        // console.log(`🔔 PREPARING TO SCHEDULE ALERTS - orderId: ${orderId}, storeId: ${store._id}, rowTime: ${store.rowTime}`);
+        // if (store && order.createdAt) {
+        //   console.log(`🚀 CALLING OrderAlertScheduler.scheduleStageAlerts...`);
+        //   await OrderAlertScheduler.scheduleStageAlerts(
+        //     order.id,
+        //     1,
+        //     store._id,
+        //     order.createdAt.toDate(),
+        //     store.rowTime
+        //   );
+        //   console.log(`✅ scheduleStageAlerts call completed for pedido ${orderId}`);
+        //   // Enviar notificações WhatsApp quando pedido for criado (estágio 1)
+        //   console.log(`📱 CALLING OrderAlertScheduler.handleStageChange for WhatsApp notifications...`);
+        //   await OrderAlertScheduler.handleStageChange(
+        //     order.id,
+        //     1,
+        //     store._id,
+        //     order.createdAt.toDate()
+        //   );
+        //   console.log(`✅ handleStageChange call completed for pedido ${orderId}`);
+        // } else {
+        //   console.log(`❌ NOT SCHEDULING ALERTS - store: ${!!store}, createdAt: ${!!order.createdAt}`);
+        // }
         return { ...order, _id: orderId };
     }
     catch (error) {

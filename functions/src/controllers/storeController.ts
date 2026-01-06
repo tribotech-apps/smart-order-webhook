@@ -41,7 +41,7 @@ export const getStoreById = async (storeId: string) => {
   try {
     console.log('🏪 [GET_STORE_BY_ID] Getting store by ID:', storeId);
     const { doc, getDoc } = require('firebase/firestore');
-    
+
     const storeRef = doc(db, "Stores", storeId);
     const storeDoc = await getDoc(storeRef);
 
@@ -179,9 +179,6 @@ export function getStoreStatus(storeDb: Store) {
 
   // console.log('5.....')
 
-  // Closing Days Check
-  if (closingDays?.includes(day)) return 'FECHADA';
-
   // console.log('6.....')
 
   // Variations Check
@@ -189,6 +186,10 @@ export function getStoreStatus(storeDb: Store) {
     console.log('7......', variation)
     return getStatusByHour(variation.openAt, variation.closeAt);
   }
+
+
+  // Closing Days Check
+  if (closingDays?.includes(day)) return 'FECHADA';
 
   // ------ Checking by Hour ------
   // console.log('4......', openAt)

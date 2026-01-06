@@ -21,7 +21,7 @@ export const getRecentConversation = async (phoneNumber: string, storeId: string
   const conversationsRef = collection(db, 'Conversations'); // Substitua 'conversations' pelo nome da sua coleção
   // console.log('Buscando conversa mais recente para o número:', phoneNumber, storeId);
   // Calcular a data/hora atual menos 5 minutos
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const minutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
   // Verificar se o número de telefone não contém o símbolo '+', adicionando-o se necessário
   if (!phoneNumber.startsWith('+')) {
@@ -35,7 +35,7 @@ export const getRecentConversation = async (phoneNumber: string, storeId: string
   const q = query(
     conversationsRef,
     where('phoneNumber', '==', phoneNumber),
-    where('date', '>=', tenMinutesAgo),
+    where('date', '>=', minutesAgo),
     where('store._id', '==', storeId),
     orderBy('date', 'desc'),
     limit(1)
@@ -140,11 +140,11 @@ export const updateConversation = async (currentConversation: Conversation, upda
       if (obj === null || obj === undefined) {
         return null;
       }
-      
+
       if (Array.isArray(obj)) {
         return obj.map(removeUndefined);
       }
-      
+
       if (typeof obj === 'object') {
         const cleaned: any = {};
         for (const key in obj) {
@@ -154,7 +154,7 @@ export const updateConversation = async (currentConversation: Conversation, upda
         }
         return cleaned;
       }
-      
+
       return obj;
     };
 

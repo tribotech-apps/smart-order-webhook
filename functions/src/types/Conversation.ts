@@ -91,6 +91,7 @@ export interface Conversation {
   } | null;
   pendingProductsQueue?: ResolvedItem[]; // fila de produtos que ainda precisam ter perguntas respondidas
   currentProcessingProduct?: ResolvedItem | null; // produto atualmente sendo processado
+  returnToPayment?: boolean;
 }
 
 export interface ResolvedItem {

@@ -48,7 +48,7 @@ export const getUserPendingOrders = async ({ uid }: { uid: string }): Promise<Or
  * @param conversation Dados da conversa.
  * @param paymentId ID do pagamento gerado (ex.: ID do Pagar.me).
  */
-export const createOrder = async (conversation: Conversation, paymentId: string): Promise<OrderType> => {
+export const createOrder = async (conversation: Conversation, paymentId: string, storeId: string): Promise<OrderType> => {
   try {
     if (!conversation.store?.slug?.trim()) {
       // TODO: handle
@@ -74,7 +74,8 @@ export const createOrder = async (conversation: Conversation, paymentId: string)
     const userUid = await ensureUserExists(
       conversation.customerName,
       conversation.phoneNumber,
-      conversation.address
+      conversation.address,
+      storeId
     );
 
     console.log('Usuário garantido. Prosseguindo com a criação do pedido.');
@@ -126,31 +127,31 @@ export const createOrder = async (conversation: Conversation, paymentId: string)
     console.log('Pedido criado com sucesso no Firestore:', order);
 
 
-    // Agendar alertas do estágio 1 (fila) usando Firebase Scheduler
-    console.log(`🔔 PREPARING TO SCHEDULE ALERTS - orderId: ${orderId}, storeId: ${store._id}, rowTime: ${store.rowTime}`);
-    if (store && order.createdAt) {
-      console.log(`🚀 CALLING OrderAlertScheduler.scheduleStageAlerts...`);
-      await OrderAlertScheduler.scheduleStageAlerts(
-        order.id,
-        1,
-        store._id,
-        order.createdAt.toDate(),
-        store.rowTime
-      );
-      console.log(`✅ scheduleStageAlerts call completed for pedido ${orderId}`);
+    // // Agendar alertas do estágio 1 (fila) usando Firebase Scheduler
+    // console.log(`🔔 PREPARING TO SCHEDULE ALERTS - orderId: ${orderId}, storeId: ${store._id}, rowTime: ${store.rowTime}`);
+    // if (store && order.createdAt) {
+    //   console.log(`🚀 CALLING OrderAlertScheduler.scheduleStageAlerts...`);
+    //   await OrderAlertScheduler.scheduleStageAlerts(
+    //     order.id,
+    //     1,
+    //     store._id,
+    //     order.createdAt.toDate(),
+    //     store.rowTime
+    //   );
+    //   console.log(`✅ scheduleStageAlerts call completed for pedido ${orderId}`);
 
-      // Enviar notificações WhatsApp quando pedido for criado (estágio 1)
-      console.log(`📱 CALLING OrderAlertScheduler.handleStageChange for WhatsApp notifications...`);
-      await OrderAlertScheduler.handleStageChange(
-        order.id,
-        1,
-        store._id,
-        order.createdAt.toDate()
-      );
-      console.log(`✅ handleStageChange call completed for pedido ${orderId}`);
-    } else {
-      console.log(`❌ NOT SCHEDULING ALERTS - store: ${!!store}, createdAt: ${!!order.createdAt}`);
-    }
+    //   // Enviar notificações WhatsApp quando pedido for criado (estágio 1)
+    //   console.log(`📱 CALLING OrderAlertScheduler.handleStageChange for WhatsApp notifications...`);
+    //   await OrderAlertScheduler.handleStageChange(
+    //     order.id,
+    //     1,
+    //     store._id,
+    //     order.createdAt.toDate()
+    //   );
+    //   console.log(`✅ handleStageChange call completed for pedido ${orderId}`);
+    // } else {
+    //   console.log(`❌ NOT SCHEDULING ALERTS - store: ${!!store}, createdAt: ${!!order.createdAt}`);
+    // }
 
     return { ...order, _id: orderId };
   } catch (error: any) {

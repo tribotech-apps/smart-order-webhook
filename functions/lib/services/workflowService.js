@@ -5,7 +5,6 @@ const firestore_1 = require("firebase/firestore");
 const firebase_1 = require("../firebase");
 const notificationService_1 = require("./notificationService");
 const messagingService_1 = require("./messagingService");
-const orderAlertScheduler_1 = require("./orderAlertScheduler");
 const storeController_1 = require("../controllers/storeController");
 class WorkflowService {
     /**
@@ -99,12 +98,12 @@ class WorkflowService {
             // Após sucesso da transação, lidar com alertas
             if (toFlowId <= 3 && !cancel) {
                 // Para estágios 1, 2, 3: agendar novos alertas
-                await orderAlertScheduler_1.OrderAlertScheduler.handleStageChange(orderId, toFlowId, storeId, result.orderData.createdAt.toDate());
+                // await OrderAlertScheduler.handleStageChange(orderId, toFlowId, storeId, result.orderData.createdAt.toDate());
             }
             else if (toFlowId >= 4 || cancel) {
                 // Para estágio 4 (entregue), 5 (cancelada) ou qualquer cancelamento: cancelar todas as tasks
                 console.log(`🗑️ [WORKFLOW_SERVICE] Order ${orderId} moved to final stage ${toFlowId} or cancelled, cancelling all pending tasks...`);
-                await orderAlertScheduler_1.OrderAlertScheduler.cancelOrderTasks(orderId);
+                // await OrderAlertScheduler.cancelOrderTasks(orderId);
                 console.log(`✅ [WORKFLOW_SERVICE] All tasks cancelled for order ${orderId}`);
             }
             // Enviar WhatsApp para o cliente informando a mudança de estágio
@@ -379,13 +378,13 @@ class WorkflowService {
                 deliveryManId: null
             });
             // Cancelar todas as tasks pendentes
-            console.log(`🗑️ [WORKFLOW_SERVICE] Cancelling all pending tasks for cancelled order ${orderId}...`);
-            await orderAlertScheduler_1.OrderAlertScheduler.cancelOrderTasks(orderId);
+            // console.log(`🗑️ [WORKFLOW_SERVICE] Cancelling all pending tasks for cancelled order ${orderId}...`);
+            // await OrderAlertScheduler.cancelOrderTasks(orderId);
             // Enviar notificações de cancelamento
-            await Promise.all([
-                this.sendCancellationMessages(orderData, reason),
-                notificationService_1.notificationService.notifyOrderCancelled(orderId, storeId, reason)
-            ]);
+            // await Promise.all([
+            //   this.sendCancellationMessages(orderData, reason),
+            //   notificationService.notifyOrderCancelled(orderId, storeId, reason)
+            // ]);
             console.log(`Order ${orderId} cancelled successfully`);
             return true;
         }

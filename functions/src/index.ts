@@ -1,4 +1,6 @@
 import * as functions from 'firebase-functions';
+import * as functionsV1 from 'firebase-functions/v1';
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import logger from 'morgan';
@@ -114,8 +116,55 @@ exports.talkCommerceWhatsappWebhook = functions.https.onRequest({
   concurrency: 80
 }, app);
 
-// Export alert processor function
-export { processOrderAlert } from './processOrderAlert';
+
+
+export const deleteExpiredConversations = functionsV1.pubsub
+  .schedule('1 0 * * *') // Agendamento para rodar todos os dias às 00:00:01
+  .timeZone('America/Sao_Paulo')
+  .onRun(async (context) => {
+    const now = new Date();
+    const minutesAgo = new Date(now.getTime() - 10 * 60 * 1000); // 5 minutos atrás
+
+    // Define o início e fim do dia anterior
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0); // Início do dia de ontem
+
+    const endOfYesterday = new Date(yesterday);
+    endOfYesterday.setHours(23, 59, 59, 999); // Final do dia de ontem
+
+    const db = admin.firestore();
+
+    try {
+      const conversationsRef = db.collection('Conversations');
+      const querySnapshot = await conversationsRef
+        .where('date', '>=', yesterday) // Conversas de ontem
+        .where('date', '<=', endOfYesterday) // Até o final de ontem
+        .where('date', '<=', minutesAgo) // Com mais de 5 minutos de idle
+        .get();
+
+      if (querySnapshot.empty) {
+        console.log('Nenhuma conversa de ontem com idle > 5 minutos encontrada.');
+        return null;
+      }
+
+      // Apagar cada documento encontrado
+      const batch = db.batch();
+      querySnapshot.forEach((doc: { ref: any; }) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+      console.log(`${querySnapshot.size} conversas de ontem com idle > 5 min foram apagadas.`);
+    } catch (error) {
+      console.error('Erro ao apagar conversas antigas:', error);
+    }
+
+    return null;
+  });
+
+// // Export alert processor function
+// export { processOrderAlert } from './processOrderAlert';
 
 // Export overdue orders checker function
-export { checkOverdueOrders } from './checkOverdueOrders';
+// export { checkOverdueOrders } from './checkOverdueOrders';

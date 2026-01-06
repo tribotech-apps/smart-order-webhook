@@ -36,9 +36,9 @@ function formatBeautifulMenu(products: any[]): string {
       const optionalQuestions = product.questions.filter((q: any) => q.minAnswerRequired === 0);
       const requiredQuestions = product.questions.filter((q: any) => q.minAnswerRequired > 0);
 
-      if (requiredQuestions.length > 0) {
-        beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
-      }
+      // if (requiredQuestions.length > 0) {
+      //   beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
+      // }
 
       if (optionalQuestions.length > 0) {
         beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
@@ -48,7 +48,7 @@ function formatBeautifulMenu(products: any[]): string {
     beautifulMenu += '\n━━━━━━━━━━━━━━━━━━━━\n\n';
   });
 
-  beautifulMenu += '📱 *Para fazer seu pedido, digite o nome do produto desejado!*\n\n';
+  beautifulMenu += '📱 *Para fazer seu pedido, informe o nome do produto desejado!*\n\n';
   beautifulMenu += '💬 Exemplo: "Quero uma pizza margherita" ou "1 marmitex médio"';
 
   return beautifulMenu;
@@ -73,6 +73,7 @@ import { diagnostics, DiagnosticCategory } from '../../services/diagnosticsServi
 import { getActiveOrder } from '../../controllers/ordersController';
 import { classifyCustomerIntent, extractProductsFromMessageWithAI, } from '../../services/messageHelper';
 import { processVoiceMessage, isVoiceMessage, extractAudioFromMessage } from '../../services/audioService';
+import { filterMenuByWeekday } from '../../services/orderService';
 
 const client = new SecretManagerServiceClient();
 const clientGoogle = new Client({});
@@ -277,7 +278,6 @@ router.post('/webhook', async (req, res) => {
   // Verificar se a requisição é relacionada ao WhatsApp Flows
   // const { encrypted_flow_data, encrypted_aes_key, initial_vector } = req.body;
 
-
   /***************************************************************************************************************************** *
   /* ----------------------------------------- MENSAGENS RECEBIDAS POR TEXTO NORMAL  ------------------------------------------- */
   /***************************************************************************************************************************** */
@@ -296,8 +296,8 @@ router.post('/webhook', async (req, res) => {
   // Buscar a loja pelo campo phoneNumberId
   const store = await getStoreByWabaPhoneNumberId(storePhoneNumberId);
 
-  if (!store?.wabaEnvironments || !store?.flowId) {
-    notifyAdmin('Loja não encontrada, ou wabaEnvironments e flowId nao setados para o phoneNumberId: ' + storePhoneNumberId);
+  if (!store?.wabaEnvironments) {
+    notifyAdmin('Loja não encontrada, ou wabaEnvironments nao setados para o phoneNumberId: ' + storePhoneNumberId);
     res.status(404).send('Loja não encontrada');
     return;
   }
@@ -322,7 +322,6 @@ router.post('/webhook', async (req, res) => {
 
           const from = message.from; // Número de telefone do remetente
           const type = message.type; // Tipo da mensagem
-          const activeOrder = await getActiveOrder(from, store._id);
 
           if (!store?.wabaEnvironments) {
             // TODO: handle
@@ -374,58 +373,57 @@ router.post('/webhook', async (req, res) => {
 
             let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
 
-            console.log('COMPRAS ANTIGAS', currentConversation, activeOrder)
-
-            if (activeOrder && !currentConversation) {
-              // Envia mensagem sobre o status do pedido atual e se quer cancelar
-              const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`
-              const messagePayload: any = {
-                messaging_product: 'whatsapp',
-                to: '+' + from,
-                type: 'interactive',
-                interactive: {
-                  type: 'button',
-                  body: {
-                    text: responseMessage
-                  },
-                  action: {
-                    buttons: [
-                      {
-                        type: 'reply',
-                        reply: {
-                          id: 'start_new_order',
-                          title: 'Fazer novo Pedido'
-                        }
-                      },
-                      {
-                        type: 'reply',
-                        reply: {
-                          id: 'cancel_order',
-                          title: 'Cancelar Pedido'
-                        }
-                      },
-                    ]
-                  }
-                }
-              };
-
-              // Adicionar header com logo da loja se disponível
-              if (store.logo) {
-                messagePayload.interactive.header = {
-                  type: 'image',
-                  image: {
-                    link: store.logo
+            if (!currentConversation) {
+              const activeOrder = await getActiveOrder(from, store._id);
+              console.log('COMPRAS ANTIGAS', currentConversation, activeOrder)
+              if (activeOrder) {
+                // Envia mensagem sobre o status do pedido atual e se quer cancelar
+                const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`
+                const messagePayload: any = {
+                  messaging_product: 'whatsapp',
+                  to: '+' + from,
+                  type: 'interactive',
+                  interactive: {
+                    type: 'button',
+                    body: {
+                      text: responseMessage
+                    },
+                    action: {
+                      buttons: [
+                        {
+                          type: 'reply',
+                          reply: {
+                            id: 'start_new_order',
+                            title: 'Fazer novo Pedido'
+                          }
+                        },
+                        {
+                          type: 'reply',
+                          reply: {
+                            id: 'cancel_order',
+                            title: 'Cancelar Pedido'
+                          }
+                        },
+                      ]
+                    }
                   }
                 };
+
+                // Adicionar header com logo da loja se disponível
+                if (store.logo) {
+                  messagePayload.interactive.header = {
+                    type: 'image',
+                    image: {
+                      link: store.logo
+                    }
+                  };
+                }
+
+                await (sendMessage(messagePayload, store.wabaEnvironments))
+                return;
+
               }
 
-              await (sendMessage(messagePayload, store.wabaEnvironments))
-              return;
-            }
-
-            const userFrom = await getUserByPhone(from);
-
-            if (!currentConversation) {
 
               // Check opening hour
               const storeStatus = getStoreStatus(store);
@@ -437,7 +435,7 @@ router.post('/webhook', async (req, res) => {
                   to: "+" + from,
                   type: 'text',
                   text: {
-                    body: 'A loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
+                    body: 'Olá, a loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
                   },
                 }, store.wabaEnvironments);
 
@@ -459,12 +457,24 @@ router.post('/webhook', async (req, res) => {
                 message,
               };
 
+              const userFrom = await getUserByPhone(from);
+
               if (userFrom?.address) {
                 newConversation.address = userFrom.address;
               }
 
+
               const docId = await createConversation(newConversation);
               currentConversation = { ...newConversation, docId };
+
+
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ Olá, tudo bem? Obrigado pela visita. Este canal é exclusivo para pedidos delivery.` }
+              }, store.wabaEnvironments);
+
 
               const messageIntention = await classifyCustomerIntent(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
 
@@ -475,16 +485,16 @@ router.post('/webhook', async (req, res) => {
               switch (messageIntention.intent) {
                 case "greeting":
                 case "other":
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `✅ Olá, tudo bem? Este canal é exclusivo para pedidos delivery. O que gostaria de pedir hoje?` }
-                  }, store.wabaEnvironments);
+                  // await sendMessage({
+                  //   messaging_product: 'whatsapp',
+                  //   to: "+" + from,
+                  //   type: 'text',
+                  //   text: { body: `✅ Olá, tudo bem? Este canal é exclusivo para pedidos delivery. O que gostaria de pedir hoje?` }
+                  // }, store.wabaEnvironments);
 
                   break;
                 case "want_menu_or_start":
-                  const beautifulMenu = formatBeautifulMenu(store.menu || []);
+                  const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu) || []);
                   // Enviar cardápio formatado para o cliente
                   if (store.wabaEnvironments) {
                     await sendMessage({
@@ -532,147 +542,149 @@ router.post('/webhook', async (req, res) => {
               return;
             }
 
+            const userFrom = await getUserByPhone(from);
+
             await handleIncomingTextMessage(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
             return;
           }
 
-          //**** MENSAGEM INTERATIVA, DELIVERY OR COUNTER ******/
-          if (message.interactive?.type === 'button_reply' &&
-            (message.interactive?.button_reply?.id === 'delivery' || message.interactive?.button_reply?.id === 'counter')) {
+          // //**** MENSAGEM INTERATIVA, DELIVERY OR COUNTER ******/
+          // if (message.interactive?.type === 'button_reply' &&
+          //   (message.interactive?.button_reply?.id === 'delivery' || message.interactive?.button_reply?.id === 'counter')) {
 
-            const deliveryChoice = message.interactive.button_reply.id;
-            let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
-            const userFrom = await getUserByPhone(from);
+          //   const deliveryChoice = message.interactive.button_reply.id;
+          //   let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
+          //   const userFrom = await getUserByPhone(from);
 
-            console.log(`----BOTÃO ${deliveryChoice.toUpperCase()} CLICADO-----`, currentConversation?.lastMessage);
+          //   console.log(`----BOTÃO ${deliveryChoice.toUpperCase()} CLICADO-----`, currentConversation?.lastMessage);
 
-            if (!currentConversation || currentConversation.flow !== 'DELIVERY_TYPE') {
-              console.log('ERRO: Conversa não encontrada ou flow incorreto para delivery choice');
-              return;
-            }
+          //   if (!currentConversation || currentConversation.flow !== 'DELIVERY_TYPE') {
+          //     console.log('ERRO: Conversa não encontrada ou flow incorreto para delivery choice');
+          //     return;
+          //   }
 
-            if (deliveryChoice === 'counter') {
-              // Cliente escolheu retirada no balcão
-              console.log('----cliente ESCOLHEU RETIRADA NO BALCÃO-----', currentConversation?.lastMessage)
+          //   if (deliveryChoice === 'counter') {
+          //     // Cliente escolheu retirada no balcão
+          //     console.log('----cliente ESCOLHEU RETIRADA NO BALCÃO-----', currentConversation?.lastMessage)
 
-              await updateConversation(currentConversation, {
-                deliveryOption: 'counter',
-                flow: 'CATEGORIES'
-              })
+          //     await updateConversation(currentConversation, {
+          //       deliveryOption: 'counter',
+          //       flow: 'CATEGORIES'
+          //     })
 
-              if (currentConversation.lastMessage) {
-                const extractedProdutcs = await extractProductsFromMessageWithAI(currentConversation?.lastMessage || "", store.menu.map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }))
+          //     if (currentConversation.lastMessage) {
+          //       const extractedProdutcs = await extractProductsFromMessageWithAI(currentConversation?.lastMessage || "", store.menu.map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }))
 
-                console.log('*********** EXTRACTED PRODUCTS z***********: ', extractedProdutcs);
+          //       console.log('*********** EXTRACTED PRODUCTS z***********: ', extractedProdutcs);
 
-                if (extractedProdutcs?.ambiguidades?.length) {
+          //       if (extractedProdutcs?.ambiguidades?.length) {
 
-                  const itensAmbiguos = extractedProdutcs.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
+          //         const itensAmbiguos = extractedProdutcs.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
 
-                  extractedProdutcs.ambiguidades[0].refining = true;
+          //         extractedProdutcs.ambiguidades[0].refining = true;
 
-                  await updateConversation(currentConversation, {
-                    flow: `ORDER_REFINMENT`,
-                    refinmentItems: extractedProdutcs,
-                  });
+          //         await updateConversation(currentConversation, {
+          //           flow: `ORDER_REFINMENT`,
+          //           refinmentItems: extractedProdutcs,
+          //         });
 
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `Você pediu ${extractedProdutcs.ambiguidades[0].quantity} ${extractedProdutcs.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
-                  }, store.wabaEnvironments);
-                } else if (extractedProdutcs.items && extractedProdutcs.items.length > 0) {
-                  // Itens resolvidos diretamente, vamos confirmar com o cliente
-                  const itensResolvidos = extractedProdutcs.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
+          //         await sendMessage({
+          //           messaging_product: 'whatsapp',
+          //           to: "+" + from,
+          //           type: 'text',
+          //           text: { body: `Você pediu ${extractedProdutcs.ambiguidades[0].quantity} ${extractedProdutcs.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+          //         }, store.wabaEnvironments);
+          //       } else if (extractedProdutcs.items && extractedProdutcs.items.length > 0) {
+          //         // Itens resolvidos diretamente, vamos confirmar com o cliente
+          //         const itensResolvidos = extractedProdutcs.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
 
-                  await updateConversation(currentConversation, {
-                    flow: `ORDER_REFINMENT_CONFIRMATION`,
-                    refinmentItems: extractedProdutcs
-                  });
+          //         await updateConversation(currentConversation, {
+          //           flow: `ORDER_REFINMENT_CONFIRMATION`,
+          //           refinmentItems: extractedProdutcs
+          //         });
 
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
-                  }, store.wabaEnvironments);
-                } else {
-                  // Não encontrou produtos
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
+          //         await sendMessage({
+          //           messaging_product: 'whatsapp',
+          //           to: "+" + from,
+          //           type: 'text',
+          //           text: { body: `Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
+          //         }, store.wabaEnvironments);
+          //       } else {
+          //         // Não encontrou produtos
+          //         await sendMessage({
+          //           messaging_product: 'whatsapp',
+          //           to: "+" + from,
 
-                    type: 'text',
-                    text: { body: `Não consegui identificar os produtos que você mencionou. Pode me dizer o nome do produto que deseja do nosso cardápio?` }
-                  }, store.wabaEnvironments);
-                }
+          //           type: 'text',
+          //           text: { body: `Não consegui identificar os produtos que você mencionou. Pode me dizer o nome do produto que deseja do nosso cardápio?` }
+          //         }, store.wabaEnvironments);
+          //       }
 
-                return;
-              }
+          //       return;
+          //     }
 
-              // // Formatar cardápio bonito e enviar direto
-              // console.log('Enviando cardápio formatado para retirada', currentConversation.lastMessage)
+          //     // // Formatar cardápio bonito e enviar direto
+          //     // console.log('Enviando cardápio formatado para retirada', currentConversation.lastMessage)
 
-              // const beautifulMenu = formatBeautifulMenu(store.menu || []);
+          //     // const beautifulMenu = formatBeautifulMenu(store.menu || []);
 
-              // // Atualizar histórico da conversa
-              // await updateConversation(currentConversation, {
-              //   deliveryOption: 'counter', // Garantir que mantém como retirada
-              //   flow: 'CATEGORIES',
-              //   history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente escolheu retirada na loja`
-              // });
+          //     // // Atualizar histórico da conversa
+          //     // await updateConversation(currentConversation, {
+          //     //   deliveryOption: 'counter', // Garantir que mantém como retirada
+          //     //   flow: 'CATEGORIES',
+          //     //   history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente escolheu retirada na loja`
+          //     // });
 
-              // // Enviar cardápio formatado para o cliente
-              // if (store.wabaEnvironments) {
-              //   await sendMessage({
-              //     messaging_product: 'whatsapp',
-              //     to: "+" + from,
-              //     type: 'text',
-              //     text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${beautifulMenu}` }
-              //   }, store.wabaEnvironments);
-              // }
+          //     // // Enviar cardápio formatado para o cliente
+          //     // if (store.wabaEnvironments) {
+          //     //   await sendMessage({
+          //     //     messaging_product: 'whatsapp',
+          //     //     to: "+" + from,
+          //     //     type: 'text',
+          //     //     text: { body: `✅ Perfeito! Você escolheu **retirada na loja**.\n\n${beautifulMenu}` }
+          //     //   }, store.wabaEnvironments);
+          //     // }
 
-            } else if (deliveryChoice === 'delivery') {
-              // Cliente escolheu delivery
-              console.log('----cliente ESCOLHEU DELIVERY-----')
+          //   } else if (deliveryChoice === 'delivery') {
+          //     // Cliente escolheu delivery
+          //     console.log('----cliente ESCOLHEU DELIVERY-----')
 
-              await updateConversation(currentConversation, {
-                deliveryOption: 'delivery',
-                flow: 'CHECK_ADDRESS'
-              })
+          //     await updateConversation(currentConversation, {
+          //       deliveryOption: 'delivery',
+          //       flow: 'CHECK_ADDRESS'
+          //     })
 
-              // Agora verifica se tem endereço cadastrado
-              if (userFrom?.address) {
-                console.log('----cliente TEM ENDERECO-----')
+          //     // Agora verifica se tem endereço cadastrado
+          //     if (userFrom?.address) {
+          //       console.log('----cliente TEM ENDERECO-----')
 
-                if (store.wabaEnvironments) {
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `✅ Endereço encontrado!\n\n📍 **${userFrom.address.name}**\n\nVocê confirma este endereço ou deseja informar outro?` },
-                  }, store.wabaEnvironments)
-                }
+          //       if (store.wabaEnvironments) {
+          //         await sendMessage({
+          //           messaging_product: 'whatsapp',
+          //           to: "+" + from,
+          //           type: 'text',
+          //           text: { body: `✅ Endereço encontrado!\n\n📍 **${userFrom.address.name}**\n\nVocê confirma este endereço ou deseja informar outro?` },
+          //         }, store.wabaEnvironments)
+          //       }
 
-                await updateConversation(currentConversation, { flow: 'ADDRESS_CONFIRMATION' })
+          //       await updateConversation(currentConversation, { flow: 'ADDRESS_CONFIRMATION' })
 
-              } else {
-                console.log('----cliente NAO TEM ENDERECO, PEDE PARA INFORMAR-----')
+          //     } else {
+          //       console.log('----cliente NAO TEM ENDERECO, PEDE PARA INFORMAR-----')
 
-                if (store.wabaEnvironments) {
-                  await sendMessage({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: `✅ Por favor, informe seu endereço completo` },
-                  }, store.wabaEnvironments)
-                }
+          //       if (store.wabaEnvironments) {
+          //         await sendMessage({
+          //           messaging_product: 'whatsapp',
+          //           to: "+" + from,
+          //           type: 'text',
+          //           text: { body: `✅ Por favor, informe seu endereço` },
+          //         }, store.wabaEnvironments)
+          //       }
 
-                await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' })
-              }
-            }
-          }
+          //       await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' })
+          //     }
+          //   }
+          // }
         }
       });
     });
@@ -701,5 +713,3 @@ router.post('/error-notification', (req, res) => {
 
 
 export default router;
-
-

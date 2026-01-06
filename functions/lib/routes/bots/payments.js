@@ -112,7 +112,7 @@ router.post('/asaas/pix-payment', async (req, res) => {
                     // Atualizar o método de pagamento na conversa
                     currentConversation.paymentMethod = 'PIX';
                     // Criar o pedido no banco de dados
-                    const newOrder = await (0, ordersController_1.createOrder)(currentConversation, paymentId);
+                    const newOrder = await (0, ordersController_1.createOrder)(currentConversation, paymentId, "");
                     // Enviar notificação push para o app mobile
                     if (newOrder && currentConversation.store._id) {
                         try {

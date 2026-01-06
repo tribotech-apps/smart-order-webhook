@@ -206,7 +206,7 @@ class OrderAlertScheduler {
             }
             else {
                 console.log(`🟢 [STAGE_CHANGE] GREEN - scheduling both alerts`);
-                await this.scheduleStageAlerts(orderId, newStageId, storeId, createdAt, limitMinutes);
+                // await this.scheduleStageAlerts(orderId, newStageId, storeId, createdAt, limitMinutes);
             }
         }
         catch (error) {

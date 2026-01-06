@@ -12,6 +12,9 @@ import { onInit } from 'firebase-functions/v2/core';
 import { v4 as uuidv4 } from 'uuid';
 
 import { classifyCustomerIntent, extractProductsFromMessageWithAI, selectMultipleOptionsByAI, interpretOrderConfirmation, identifyPaymentMethod, identifyDeliveryType } from './messageHelper';
+import { MenuItem, Weekday } from '../types/Store';
+import { Console } from 'console';
+import { filterMenuByWeekday } from './orderService';
 
 // Função para formatar o cardápio de forma bonita
 function formatBeautifulMenu(products: any[]): string {
@@ -46,9 +49,9 @@ function formatBeautifulMenu(products: any[]): string {
       const optionalQuestions = product.questions.filter((q: any) => q.minAnswerRequired === 0);
       const requiredQuestions = product.questions.filter((q: any) => q.minAnswerRequired > 0);
 
-      if (requiredQuestions.length > 0) {
-        beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
-      }
+      // if (requiredQuestions.length > 0) {
+      //   beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
+      // }
 
       if (optionalQuestions.length > 0) {
         beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
@@ -58,7 +61,7 @@ function formatBeautifulMenu(products: any[]): string {
     beautifulMenu += '\n━━━━━━━━━━━━━━━━━━━━\n\n';
   });
 
-  beautifulMenu += '📱 *Para fazer seu pedido, digite o nome do produto desejado!*\n\n';
+  beautifulMenu += '📱 *Para fazer seu pedido,  do produto desejado!*\n\n';
   beautifulMenu += '💬 Exemplo: "Quero uma pizza margherita" ou "1 marmitex médio"';
 
   return beautifulMenu;
@@ -190,7 +193,7 @@ async function processNextProductInQueue(
       messaging_product: 'whatsapp',
       to: "+" + from,
       type: 'text',
-      text: { body: `✅ Todos os produtos foram adicionados!\n\n🛒 **RESUMO DO PEDIDO** (${deliveryLabel}):\n${itemsSummary}\n\n💰 **Subtotal:** R$ ${subtotal.toFixed(2)}${deliveryText}\n💵 **TOTAL:** R$ ${totalFinal.toFixed(2)}\n\n❓ **O que deseja fazer agora?**\n\n1️⃣ Adicionar mais produtos\n2️⃣ Finalizar pedido` }
+      text: { body: `✅ Todos os produtos foram adicionados!\n\n🛒 **RESUMO DO PEDIDO** (${deliveryLabel}):\n${itemsSummary}\n\n💰 **Subtotal:** R$ ${subtotal.toFixed(2)}${deliveryText}\n💵 **TOTAL:** R$ ${totalFinal.toFixed(2)}\n\n❓ **O que deseja fazer agora?**\n\n1️ Adicionar mais produtos\n2️ Finalizar pedido` }
     }, store.wabaEnvironments);
 
     return;
@@ -199,7 +202,7 @@ async function processNextProductInQueue(
   // Pegar próximo produto da fila
   const nextProduct = pendingProductsQueue[0];
   const remainingQueue = pendingProductsQueue.slice(1);
-  const fullMenuItem = store.menu.find((item: any) => item.menuId === nextProduct.menuId);
+  const fullMenuItem = filterMenuByWeekday(store.menu).find((item: any) => item.menuId === nextProduct.menuId);
 
   if (!fullMenuItem) {
     // Produto não encontrado - pular para o próximo
@@ -259,7 +262,7 @@ async function processNextProductInQueue(
       menuName: nextProduct.menuName,
       menuDescription: fullMenuItem.menuDescription || '',
       categoryId: fullMenuItem.categoryId || 0,
-      allDays: fullMenuItem.allDays || [],
+      allDays: fullMenuItem.allDays || true,
       price: nextProduct.price,
       quantity: nextProduct.quantity,
       questions: []
@@ -479,7 +482,7 @@ export async function handleIncomingTextMessage(
         case "greeting":
         case "other":
         case "want_menu_or_start":
-          const beautifulMenu = formatBeautifulMenu(store.menu || []);
+          const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
           // Enviar cardápio formatado para o cliente
           if (store.wabaEnvironments) {
             await sendMessage({
@@ -525,8 +528,7 @@ export async function handleIncomingTextMessage(
 
     // verifica se e confirmacao de endereco
     if (currentConversation?.flow === 'NEW_ADDRESS') {
-
-      console.log('---------new ADDRESS---------')
+      console.log('---------new ADDRESS---------', message?.text?.body)
 
       const address = message?.text?.body;
       if (!address) {
@@ -534,11 +536,13 @@ export async function handleIncomingTextMessage(
           messaging_product: 'whatsapp',
           to: "+" + from,
           type: 'text',
-          text: { body: `✅ Por favor, informe seu endereço completo` },
+          text: { body: `✅ Por favor, informe seu endereço` },
         }, store.wabaEnvironments)
 
         return;
       }
+
+      console.log('ENDERECO INFORMADO', address, `${address} - ${store.address?.city || ''} - ${store.address?.state || ''}`)
 
       // Chama o Google Places API
       try {
@@ -551,13 +555,15 @@ export async function handleIncomingTextMessage(
           },
         });
 
+        console.log('PREDICTIONS', response?.data?.predictions)
+
         if (!response?.data?.predictions || response.data.predictions.length === 0) {
           // Não encontrou endereço: retorna para ADDRESS_INFORMATION (mensagem de erro pode ser implementada depois)
           sendMessage({
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro` },
+            text: { body: `📍 Por favor, informe seu endereço novamente.\n\nExemplo: Rua das Torres, 181, apto 10` },
           }, store.wabaEnvironments)
 
           await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' });
@@ -597,6 +603,7 @@ export async function handleIncomingTextMessage(
             })
           );
 
+          console.log('PREDICTIONS', response?.data?.predictions)
 
           if (!predictions.length) {
             console.log('NAO ENCONTROU ENDERECOS - PREDICTIONS VAZIO')
@@ -605,7 +612,7 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro` },
+              text: { body: `📍 Por favor, informe seu endereço novamente.\n\nExemplo: Rua das Torres, 181, apto 10` },
             }, store.wabaEnvironments)
 
             await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' });
@@ -614,10 +621,10 @@ export async function handleIncomingTextMessage(
           }
 
           // encontrou o endereco
-          if (predictions.length === 1) {
-            console.log('ENCONTROU ENDERECO - PREDICTIONS === 1')
+          if (predictions.length >= 1) {
+            console.log('ENCONTROU ENDERECO - PREDICTIONS >= 1')
 
-            const fullAddress = addressCache[predictions[0].id].description
+            const fullAddress = addressCache[predictions[0].id]?.description
 
             sendMessage({
               messaging_product: 'whatsapp',
@@ -638,24 +645,6 @@ export async function handleIncomingTextMessage(
 
             return;
           }
-
-          // multiplos enderecos
-          if (predictions.length > 1) {
-            console.log(' ENCONTROU MULTIPLOS ENDERECOS ')
-
-            sendMessage({
-              messaging_product: 'whatsapp',
-              to: "+" + from,
-              type: 'text',
-              text: { body: `🔍 Encontramos múltiplos endereços!\n\nPor favor, verifique e informe novamente seu endereço de forma mais específica:\n\n${predictions.map((pre, index) => `${index + 1}. 📍 ${pre.description}`).join('\n')}\n\nDigite seu endereço completo novamente.` },
-            }, store.wabaEnvironments)
-
-
-            await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' });
-
-            return;
-          }
-
         }
       } catch (error) {
         notifyAdmin('Erro ao consultar Google Places:', error);
@@ -731,24 +720,39 @@ export async function handleIncomingTextMessage(
         if (currentConversation.lastMessage) {
           const extractedProducts = await extractProductsFromMessageWithAI(
             currentConversation.lastMessage,
-            store.menu.map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
+            filterMenuByWeekday(store.menu).map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
           );
 
           if (extractedProducts?.ambiguidades?.length) {
             const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
-            extractedProducts.ambiguidades[0].refining = true;
 
-            await updateConversation(currentConversation, {
-              flow: 'ORDER_REFINMENT',
-              refinmentItems: extractedProducts,
-            });
 
-            await sendMessage({
-              messaging_product: 'whatsapp',
-              to: "+" + from,
-              type: 'text',
-              text: { body: `✅ **Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
-            }, store.wabaEnvironments);
+            if (itensAmbiguos?.length > 1) {
+              extractedProducts.ambiguidades[0].refining = true;
+
+              await updateConversation(currentConversation, {
+                flow: 'ORDER_REFINMENT',
+                refinmentItems: extractedProducts,
+              });
+
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ **Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+              }, store.wabaEnvironments);
+            }
+            else {
+
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+              }, store.wabaEnvironments);
+
+              await updateConversation(currentConversation, { flow: 'CATEGORIES' })
+            }
           } else if (extractedProducts.items && extractedProducts.items.length > 0) {
             const itensResolvidos = extractedProducts.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
 
@@ -761,15 +765,24 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `✅ **nConfirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
+              text: { body: `✅ **Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
             }, store.wabaEnvironments);
+          } else {
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+            }, store.wabaEnvironments);
+
+            await updateConversation(currentConversation, { flow: 'CATEGORIES' })
           }
         } else {
           await updateConversation(currentConversation, { flow: 'CATEGORIES' });
 
           // Cliente já tem endereço confirmado pelo sistema
 
-          const beautifulMenu = formatBeautifulMenu(store.menu || []);
+          const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
 
           // Atualizar histórico da conversa
           await updateConversation(currentConversation, {
@@ -814,7 +827,7 @@ export async function handleIncomingTextMessage(
           messaging_product: 'whatsapp',
           to: "+" + from,
           type: 'text',
-          text: { body: '📍 Por favor, informe seu endereço completo novamente, incluindo o bairro.\n\nExemplo: Rua das Flores, 181, apto 10 - Jadim Amaro' }
+          text: { body: '📍 Por favor, informe seu endereço novamente, Não precisa informar o bairro.\n\nExemplo: Rua das Torres, 181, apto 10' }
         }, store.wabaEnvironments);
 
         delete currentConversation.address;
@@ -858,26 +871,43 @@ export async function handleIncomingTextMessage(
           });
 
           if (currentConversation.lastMessage) {
+            console.log('VAI ENVIAR A MENSAGEM P EXTRACAO', currentConversation.lastMessage, filterMenuByWeekday(store.menu).map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price })))
+
             const extractedProducts = await extractProductsFromMessageWithAI(
               currentConversation.lastMessage,
-              store.menu.map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
+              filterMenuByWeekday(store.menu).map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
             );
+
+            console.log('RETORNO DA EXTRACAO DA INTENCAO', extractedProducts)
 
             if (extractedProducts?.ambiguidades?.length) {
               const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
-              extractedProducts.ambiguidades[0].refining = true;
 
-              await updateConversation(currentConversation, {
-                flow: 'ORDER_REFINMENT',
-                refinmentItems: extractedProducts,
-              });
+              if (itensAmbiguos?.length > 1) {
+                extractedProducts.ambiguidades[0].refining = true;
 
-              await sendMessage({
-                messaging_product: 'whatsapp',
-                to: "+" + from,
-                type: 'text',
-                text: { body: `✅ **Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
-              }, store.wabaEnvironments);
+                await updateConversation(currentConversation, {
+                  flow: 'ORDER_REFINMENT',
+                  refinmentItems: extractedProducts,
+                });
+
+
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `✅ **Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+                }, store.wabaEnvironments);
+              } else {
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+                }, store.wabaEnvironments);
+
+                await updateConversation(currentConversation, { flow: 'CATEGORIES' })
+              }
             } else if (extractedProducts.items && extractedProducts.items.length > 0) {
               const itensResolvidos = extractedProducts.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
 
@@ -892,6 +922,15 @@ export async function handleIncomingTextMessage(
                 type: 'text',
                 text: { body: `✅ **Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
               }, store.wabaEnvironments);
+            } else {
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+              }, store.wabaEnvironments);
+
+              await updateConversation(currentConversation, { flow: 'CATEGORIES' })
             }
           }
         } else if (deliveryChoice.type === 'delivery') {
@@ -902,12 +941,12 @@ export async function handleIncomingTextMessage(
           });
 
           const userFrom = await getUserByPhone(from);
-          if (userFrom?.address) {
+          if (userFrom?.address?.lat) {
             await sendMessage({
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `✅ **Entrega confirmada!**\n\n📍 **Endereço encontrado:**\n${userFrom.address.name}\n\nVocê confirma este endereço ou deseja informar outro?` }
+              text: { body: `✅ **Pedido para Entrega!**\n\n📍 **Endereço encontrado:**\n${userFrom.address.name}\n\nVocê confirma este endereço ou deseja informar outro?` }
             }, store.wabaEnvironments);
 
             await updateConversation(currentConversation, { flow: 'ADDRESS_CONFIRMATION' });
@@ -916,7 +955,7 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: '✅ **Entrega confirmada!**\n\n📍 Por favor, informe seu endereço completo para entrega.' }
+              text: { body: '✅ **Pedido para Entrega!**\n\n📍 Por favor, informe seu endereço para entrega.' }
             }, store.wabaEnvironments);
 
             await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' });
@@ -933,7 +972,6 @@ export async function handleIncomingTextMessage(
           return;
         }
 
-
         const customerIntent = await classifyCustomerIntent(
           message.text.body,
           currentConversation.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity }))
@@ -943,7 +981,7 @@ export async function handleIncomingTextMessage(
 
         if (customerIntent.intent === 'want_menu_or_start') {
 
-          const beautifulMenu = formatBeautifulMenu(store.menu || []);
+          const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
           // Enviar cardápio formatado para o cliente
           if (store.wabaEnvironments) {
             await sendMessage({
@@ -962,14 +1000,19 @@ export async function handleIncomingTextMessage(
           if (customerIntent.intent === 'close_order') {
             // Cliente quer finalizar pedido - ir para seleção de pagamento
             await updateConversation(currentConversation, {
-              flow: 'SELECT_PAYMENT_METHOD'
+              flow: 'SELECT_PAYMENT_METHOD',
+              returnToPayment: false  // Limpar a flag
             });
+
+            const finalMessage = (currentConversation as any).returnToPayment
+              ? `✅ Alterações salvas! Agora vamos finalizar seu pedido.\n\n💳 **Como você gostaria de pagar?**\n\n1️PIX\n2️Cartão de Crédito\n3️Pagamento na Entrega`
+              : `💳 **Como você gostaria de pagar?**\n\n1️PIX\n2️Cartão de Crédito\n3️Pagamento na Entrega`;
 
             await sendMessage({
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `💳 **Como você gostaria de pagar?**\n\n1️⃣ PIX\n2️⃣ Cartão de Crédito\n3️⃣ Pagamento na Entrega` }
+              text: { body: finalMessage }
             }, store.wabaEnvironments);
 
             return;
@@ -1046,27 +1089,40 @@ export async function handleIncomingTextMessage(
           // Se não é para finalizar, continua o fluxo normal para adicionar mais produtos
         }
 
-        const extractedProdutcs = await extractProductsFromMessageWithAI(message.text.body || "", store.menu.map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }))
+        const extractedProdutcs = await extractProductsFromMessageWithAI(message.text.body || "", filterMenuByWeekday(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }))
 
-        console.log('*********** EXTRACTED PRODUCTS ***********: ', message.text.body, store.menu.map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }), extractedProdutcs);
+        console.log('*********** EXTRACTED PRODUCTS ***********: ', message.text.body, filterMenuByWeekday(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }), extractedProdutcs);
 
         if (extractedProdutcs?.ambiguidades?.length) {
 
           const itensAmbiguos = extractedProdutcs.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
 
-          extractedProdutcs.ambiguidades[0].refining = true;
 
-          await updateConversation(currentConversation, {
-            flow: `ORDER_REFINMENT`,
-            refinmentItems: extractedProdutcs,
-          });
+          if (itensAmbiguos?.length > 1) {
+            extractedProdutcs.ambiguidades[0].refining = true;
 
-          await sendMessage({
-            messaging_product: 'whatsapp',
-            to: "+" + from,
-            type: 'text',
-            text: { body: `Você pediu ${extractedProdutcs.ambiguidades[0].quantity} ${extractedProdutcs.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
-          }, store.wabaEnvironments);
+            await updateConversation(currentConversation, {
+              flow: `ORDER_REFINMENT`,
+              refinmentItems: extractedProdutcs,
+            });
+
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: `Você pediu ${extractedProdutcs.ambiguidades[0].quantity} ${extractedProdutcs.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+            }, store.wabaEnvironments);
+          } else {
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+            }, store.wabaEnvironments);
+
+            await updateConversation(currentConversation, { flow: 'CATEGORIES' })
+          }
+
         } else if (extractedProdutcs.items && extractedProdutcs.items.length > 0) {
           // Itens resolvidos diretamente, vamos confirmar com o cliente
           const itensResolvidos = extractedProdutcs.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
@@ -1088,8 +1144,10 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `Não consegui identificar os produtos que você mencionou. Pode me dizer o nome do produto que deseja do nosso cardápio?` }
+            text: { body: `✅ **Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
           }, store.wabaEnvironments);
+
+          await updateConversation(currentConversation, { flow: 'CATEGORIES' })
         }
 
         return;
@@ -1128,7 +1186,7 @@ export async function handleIncomingTextMessage(
         if (multipleProductsFromMessage && multipleProductsFromMessage.answers.length > 0) {
           // Cliente escolheu produtos específicos - converter para formato esperado
           const resolvedItems = multipleProductsFromMessage.answers.map(answer => {
-            const productDb = store.menu.find(item => item.menuId === answer.answerId);
+            const productDb = filterMenuByWeekday(store.menu).find(item => item.menuId === answer.answerId);
             if (!productDb) {
               console.error('PRODUTO NÃO ENCONTRADO:', answer.answerId);
               return null;
@@ -1180,8 +1238,11 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `Não consegui entender sua escolha. Por favor, digite exatamente o nome de uma das opções:\n\n${itensDisponiveis}` }
+            text: { body: itensDisponiveis ? `Não consegui entender sua escolha. Por favor, digite exatamente o nome de uma das opções:\n\n${itensDisponiveis}` : `Não consegui encontrar o que você está tentando resolver. Vamos recomeçar?` }
           }, store.wabaEnvironments);
+
+          await updateConversation(currentConversation, { flow: 'CATEGORIES' });
+          return;
         }
 
         return;
@@ -1284,7 +1345,7 @@ export async function handleIncomingTextMessage(
             const questionIndex = currentConversation.pendingAnswerConfirmation.questionIndex;
 
             // Encontrar o produto completo no menu
-            const fullMenuItem = store.menu.find(item => item.menuId === product.menuId);
+            const fullMenuItem = filterMenuByWeekday(store.menu).find(item => item.menuId === product.menuId);
             if (!fullMenuItem?.questions) return;
 
             // Verificar se a pergunta atual atingiu o mínimo exigido
@@ -1382,7 +1443,7 @@ export async function handleIncomingTextMessage(
                   messaging_product: 'whatsapp',
                   to: "+" + from,
                   type: 'text',
-                  text: { body: `✅ Produto adicionado ao carrinho!\n\n🛒 **RESUMO DO PEDIDO** (${deliveryLabel}):\n${itemsSummary}\n\n💰 **Subtotal:** R$ ${subtotal.toFixed(2)}${deliveryText}\n💵 **TOTAL:** R$ ${totalFinal.toFixed(2)}\n\n❓ **O que deseja fazer agora?**\n\n1️⃣ Adicionar mais produtos\n2️⃣ Finalizar pedido` }
+                  text: { body: `✅ Produto adicionado ao carrinho!\n\n🛒 **RESUMO DO PEDIDO** (${deliveryLabel}):\n${itemsSummary}\n\n💰 **Subtotal:** R$ ${subtotal.toFixed(2)}${deliveryText}\n💵 **TOTAL:** R$ ${totalFinal.toFixed(2)}\n\n❓ **O que deseja fazer agora?**\n\n1️ Adicionar mais produtos\n2️ Finalizar pedido` }
                 }, store.wabaEnvironments);
 
                 return; // CRITICAL: Stop processing after completing all questions
@@ -1393,7 +1454,7 @@ export async function handleIncomingTextMessage(
             const clientMessage = message?.text?.body || '';
             const product = currentConversation.product!;
             const questionIndex = currentConversation.pendingAnswerConfirmation.questionIndex;
-            const fullMenuItem = store.menu.find(item => item.menuId === product.menuId);
+            const fullMenuItem = filterMenuByWeekday(store.menu).find(item => item.menuId === product.menuId);
             const currentQuestion = fullMenuItem?.questions?.[questionIndex];
 
             console.log('ALLLLLLLLLLLLCIONE', currentQuestion, fullMenuItem, questionIndex, product)
@@ -1469,7 +1530,7 @@ export async function handleIncomingTextMessage(
         }
 
         // Encontrar o produto completo no menu
-        const fullMenuItem = store.menu.find(item => item.menuId === product.menuId);
+        const fullMenuItem = filterMenuByWeekday(store.menu).find(item => item.menuId === product.menuId);
         if (!fullMenuItem?.questions || currentQuestionIndex >= fullMenuItem.questions.length) {
           console.error('Question não encontrada ou índice inválido');
           await updateConversation(currentConversation, { flow: 'CATEGORIES' });
@@ -1680,12 +1741,33 @@ export async function handleIncomingTextMessage(
 
         console.log('Payment identification result:', paymentIdentification);
 
+        // Verificar se cliente quer alterar o pedido ao invés de escolher pagamento
+        if (paymentIdentification.wantsToChangeOrder) {
+          console.log('Cliente quer alterar pedido durante pagamento:', paymentIdentification.changeOrderReason);
+
+          await sendMessage({
+            messaging_product: 'whatsapp',
+            to: "+" + from,
+            type: 'text',
+            text: { body: `Entendi que você quer alterar seu pedido. 😊\n\nVocê pode:\n• Adicionar novos itens\n• Remover itens existentes\n• Alterar quantidades\n\Informe o que você gostaria de fazer ou pedir.` }
+          }, store.wabaEnvironments);
+
+          // Redirecionar para o fluxo de categorias para permitir alterações
+          // Marcar que cliente veio do pagamento para retornar depois
+          await updateConversation(currentConversation, {
+            flow: 'CATEGORIES',
+            returnToPayment: true
+          });
+
+          return;
+        }
+
         if (!paymentIdentification.method || paymentIdentification.confidence < 50) {
           await sendMessage({
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `Por favor, escolha uma das opções de pagamento:\n\n1️⃣ PIX\n2️⃣ Cartão de Crédito\n3️⃣ Pagamento na Entrega` }
+            text: { body: `Por favor, escolha uma das opções de pagamento:\n\n1️PIX\n2️Cartão de Crédito\n3️Pagamento na Entrega` }
           }, store.wabaEnvironments);
           return;
         }
@@ -1723,8 +1805,8 @@ export async function handleIncomingTextMessage(
           address: user?.address || {
             name: 'Endereço não informado',
             main: true, neighborhood: '', number: '', zipCode: '', street: ''
-          }
-        }, store._id);
+          },
+        }, store._id, store._id);
 
         // Atualizar endereço do usuário se necessário
         if (currentConversation.address && currentConversation.address.placeId) {
@@ -1772,6 +1854,8 @@ export async function handleIncomingTextMessage(
           `💳 *Pagamento:* ${paymentDisplayName}\n\n` +
           `⚡ *AÇÃO NECESSÁRIA:* Confirme ou rejeite este pedido no sistema!`;
 
+        console.log('--------------------------------------***--------------------------------------', store.whatsappNumber)
+
         await sendMessage({
           messaging_product: 'whatsapp',
           to: store.whatsappNumber,
@@ -1782,7 +1866,7 @@ export async function handleIncomingTextMessage(
         // Mensagem para o cliente
         const customerAddressText = isDelivery ? `📍 *Endereço de Entrega:* ${deliveryAddress}` : '🏪 *Retirada:* Na loja';
 
-        const customerMessage = `✅ *Pedido Confirmado!* (${deliveryLabel})\n\n` +
+        const customerMessage = `✅ *Pedido Efetuado!* (${deliveryLabel})\n\n` +
           `📋 *Número do Pedido:* #${newOrder.id}\n` +
           `🛒 *Resumo:*\n${itemsSummary}\n\n` +
           `💰 *Subtotal:* R$ ${subtotal.toFixed(2)}\n` +
@@ -2172,9 +2256,9 @@ Seja extremamente preciso. Prefira perguntar ao cliente do que assumir ou invent
       { role: "system", content: prompt },
       {
         role: "user",
-        content: `Mensagem: ${(JSON.stringify(message))}, Histórico da Conversa:'${history}', Pedido Atualizado: ${JSON.stringify(currentCart || [])}, Cardápio JSON: ${JSON.stringify(store.menu)}, 
+        content: `Mensagem: ${(JSON.stringify(message))}, Histórico da Conversa:'${history}', Pedido Atualizado: ${JSON.stringify(currentCart || [])}, Cardápio JSON: ${JSON.stringify(filterMenuByWeekday(store.menu))}, 
 
-${formatMenuForHuman(store.menu)}
+${formatMenuForHuman(filterMenuByWeekday(store.menu))}
 
 Horário de Atendimento: 08:30 às 17:00, Status da Loja: ${storeStatus}, Taxa de Entrega: R$ ${store.deliveryPrice?.toFixed(2) || '0,00'}`,
       }

@@ -112,7 +112,7 @@ exports.createUser = createUser;
  * @param phone Número de telefone do usuário.
  * @param address Endereço do usuário.
  */
-const ensureUserExists = async (name, phoneNumber, address) => {
+const ensureUserExists = async (name, phoneNumber, address, storeId) => {
     try {
         const usersRef = (0, firestore_1.collection)(db, 'Users');
         const userQuery = (0, firestore_1.query)(usersRef, (0, firestore_1.where)('phone', '==', phoneNumber));
@@ -131,6 +131,7 @@ const ensureUserExists = async (name, phoneNumber, address) => {
             phone: phoneNumber,
             address,
             createdAt: firestore_1.Timestamp.now(),
+            storeId
         };
         const newUserRef = await (0, firestore_1.addDoc)(usersRef, newUser);
         console.log('Novo usuário criado:', newUserRef.id);

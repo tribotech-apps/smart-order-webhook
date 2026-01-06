@@ -134,7 +134,7 @@ export const createUser = async (name: string, phone: string, address?: Address)
  * @param phone Número de telefone do usuário.
  * @param address Endereço do usuário.
  */
-export const ensureUserExists = async (name: string, phoneNumber: string, address: Address): Promise<string> => {
+export const ensureUserExists = async (name: string, phoneNumber: string, address: Address, storeId: string): Promise<string> => {
   try {
     const usersRef = collection(db, 'Users');
     const userQuery = query(usersRef, where('phone', '==', phoneNumber));
@@ -158,6 +158,7 @@ export const ensureUserExists = async (name: string, phoneNumber: string, addres
       phone: phoneNumber,
       address,
       createdAt: Timestamp.now(),
+      storeId
     };
 
     const newUserRef = await addDoc(usersRef, newUser);

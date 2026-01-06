@@ -149,15 +149,15 @@ function getStoreStatus(storeDb) {
     //   // if (exceptionStatus === 'FECHADA') return 'FECHADA';
     // }
     // console.log('5.....')
-    // Closing Days Check
-    if (closingDays?.includes(day))
-        return 'FECHADA';
     // console.log('6.....')
     // Variations Check
     if (variation) {
         console.log('7......', variation);
         return getStatusByHour(variation.openAt, variation.closeAt);
     }
+    // Closing Days Check
+    if (closingDays?.includes(day))
+        return 'FECHADA';
     // ------ Checking by Hour ------
     // console.log('4......', openAt)
     // console.log('8.....', openAt, closeAt)
