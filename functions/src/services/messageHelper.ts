@@ -536,128 +536,29 @@ export async function extractProductsFromMessageWithAI(
   }
 
   const systemPrompt = `
-Você é um assistente especializado em identificar produtos e quantidades em pedidos de delivery.
+TAREFA: Identifique produtos do cardápio na mensagem do cliente.
 
-TAREFA: Analisar a mensagem do cliente e identificar produtos no cardápio recebido, detectando ambiguidades quando necessário.
+REGRA CRÍTICA: Processe cada produto individualmente. Se um não existir, ignore-o e continue com os outros.
 
-REGRAS CRÍTICAS:
-1. IDENTIFICAR CADA PRODUTO MENCIONADO SEPARADAMENTE - se cliente menciona "pequena e média", são 2 produtos DIFERENTES
-2. Se cliente mencionar palavra genérica ("marmita", "coca") e existirem múltiplas opções → ambiguidades
-3. Se cliente for específico ("marmita grande", "pequena", "média") → items diretos
-4. NUNCA assumir tamanho quando não especificado
-5. CRITICAL: "uma pequena e uma média" = 2 items separados (1x pequena + 1x média)
-6. CRITICAL: "duas marmitas, uma pequena e uma média" = 2 items (1x pequena + 1x média)
-7. CRITICAL: O produto deve estar contido no cardápio para poder ser indentificado.
-
-EXEMPLOS DE AMBIGUIDADE OBRIGATÓRIA (baseado no cardápio real):
-- Se cliente disser palavra genérica E existirem múltiplas opções no cardápio → AMBIGUIDADE
-- Se cliente disser palavra específica E existir exatamente 1 opção no cardápio → ITEM DIRETO  
-- Se cliente disser qualquer palavra E NÃO existir NENHUMA opção no cardápio → IGNORAR COMPLETAMENTE
-
-EXEMPLOS SEM AMBIGUIDADE (items diretos):
-- "marmitex grande" + existe "Marmitex Grande" → ITEM DIRETO
-- "coca lata" + existe "Coca Lata" → ITEM DIRETO  
-- "guaraná" + existe apenas "Guaraná Lata" → ITEM DIRETO (matching inteligente)
-- "sorvete" + existe apenas "Sorvete" → ITEM DIRETO (matching exato)
-- "bolo" + existe apenas "Bolo Aniversário" → ITEM DIRETO (matching por palavra-chave)
-- "uma pequena e uma média" → 2 ITEMS: [1x "Marmitex Pequeno", 1x "Marmitex Médio"]
-- "duas marmitas pequenas" → 1 ITEM: [2x "Marmitex Pequeno"]
-- Existe apenas 1 produto no cardápio que combina → SEMPRE ITEM DIRETO
-
-REGRA FUNDAMENTAL: ANALISE APENAS PROTUDOS CONTIDOS NO CARDÁPIO FORNECIDO ABAIXO! 
-
-CARDÁPIO DISPONÍVEL:
+CARDÁPIO:
 ${JSON.stringify(cardapio, null, 2)}
 
-ALGORITMO OBRIGATÓRIO:
-1. Para cada palavra/frase do cliente, procure no cardápio fornecido por produtos com nomes similares
-2. PREPROCESSING DE FRASES: 
-   - "sorvete de chocolate/morango/baunilha" → procure por "sorvete sabores"
-   - "pizza de mussarela/calabresa" → procure por "pizza sabores"  
-   - Remova o sabor específico e procure pelo produto base + "sabores"
-3. MATCHING INTELIGENTE: ignore acentos, case, palavras parciais
-4. DECISÃO BASEADA NO QUE ENCONTRAR:
-   - 0 produtos no cardápio = IGNORAR COMPLETAMENTE (não retornar nada)
-   - 1 produto no cardápio = ITEM DIRETO (NUNCA ambiguidade)
-   - 2+ produtos no cardápio = AMBIGUIDADE OBRIGATÓRIA (apenas quando há múltiplas opções)
-5. NUNCA criar ambiguidades ou items para produtos que NÃO EXISTEM no cardápio fornecido
-6. NUNCA misture: uma palavra vai para items OU ambiguidades OU é ignorada, nunca combinações
+ALGORITMO:
+1. Divida a mensagem em produtos (ex: "pizza, 2 guaranás, coca" = 3 produtos)
+2. Para cada produto: busque nome similar no cardápio (ignore acentos/case)
+3. "sorvete de chocolate" → busque "sorvete sabores"
+4. Decisão: 0 match = ignore | 1 match = item direto | 2+ matches = ambiguidade
 
-REGRAS DE MATCHING:
-- Ignore acentos: "guarana" = "guaraná" = "Guaraná"
-- Palavras parciais: "guaraná" combina com "Guaraná Lata"
-- Case insensitive: "GUARANÁ" = "guaraná" = "Guaraná"
-- Seja flexível: "bolo" combina com "Bolo Aniversário"
-- PRODUTOS COM SABORES/OPCIONAIS: 
-  - "sorvete de chocolate" → "Sorvete Sabores" (ignore o sabor, foque no produto base)
-  - "pizza de mussarela" → "Pizza Sabores" (ignore o sabor, foque no produto base)
-  - "hambúrguer de frango" → "Hambúrguer Sabores" (ignore o sabor, foque no produto base)
-  - Quando cliente menciona PRODUTO + DE + SABOR, procure por "PRODUTO Sabores"
+EXEMPLOS:
+"pizza, 2 guaranás, coca" com cardápio ["Guaraná Lata", "Coca Lata"]
+→ items: [{"menuName": "Guaraná Lata", "quantity": 2}, {"menuName": "Coca Lata", "quantity": 1}]
+→ ambiguidades: [] (pizza ignorada)
 
-RESPOSTA EM JSON:
-{
-  "items": [
-    {
-      "menuId": number,
-      "menuName": "string (nome exato do cardápio)",
-      "quantity": number,
-      "palavra": "string (palavra usada pelo cliente)",
-      "price": number
-    }
-  ],
-  "ambiguidades": [
-    {
-      "id": "string",
-      "palavra": "string (palavra ambígua do cliente)",
-      "quantity": number,
-      "items": [
-        {
-          "menuId": number,
-          "menuName": "string (nome exato do cardápio)",
-          "price": number
-        }
-      ]
-    }
-  ]
-}
+"coca" com cardápio ["Coca Lata", "Coca 1 Litro"] 
+→ items: []
+→ ambiguidades: [{"palavra": "coca", "quantity": 1, "items": [ambas as cocas]}] (múltiplas opções = ambiguidade)
 
-CASOS CRÍTICOS E EXEMPLOS COMPLETOS:
-
-1. MATCHING SIMPLES (1 opção no cardápio):
-Cliente: "guaraná" + cardápio ["Guaraná Lata"]
-→ items: [{"menuId": 6, "menuName": "Guaraná Lata", "quantity": 1, "palavra": "guaraná", "price": 5.9}]
-
-Cliente: "sorvete de chocolate" + cardápio ["Sorvete Sabores"]
-→ items: [{"menuId": 8, "menuName": "Sorvete Sabores", "quantity": 1, "palavra": "sorvete de chocolate", "price": 12.0}]
-
-2. AMBIGUIDADES (múltiplas opções no cardápio):
-Cliente: "marmita" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]
-→ ambiguidades: [{"palavra": "marmita", "quantity": 1, "items": [todos os 3 tamanhos]}]
-
-3. PRODUTOS INEXISTENTES (IGNORAR COMPLETAMENTE):
-Cliente: "pizza de mussarela" + cardápio ["Marmitex Pequeno", "Guaraná Lata", "Sorvete"]
-→ items: [], ambiguidades: [] (pizza não existe no cardápio = IGNORAR)
-
-Cliente: "hambúrguer" + cardápio ["Marmitex Pequeno", "Guaraná Lata"]  
-→ items: [], ambiguidades: [] (hambúrguer não existe no cardápio = IGNORAR)
-
-Cliente: "sushi de salmão" + cardápio ["Marmitex Pequeno", "Guaraná Lata"]
-→ items: [], ambiguidades: [] (sushi não existe no cardápio = IGNORAR)
-
-3. ITEMS DIRETOS (específicos):
-Cliente: "uma pequena e uma média" + cardápio ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]  
-→ items: [{"menuName": "Marmitex Pequeno", "quantity": 1}, {"menuName": "Marmitex Médio", "quantity": 1}]
-
-Cliente: "coca lata" + cardápio ["Coca Cola Lata", "Coca Cola 1 Litro"]
-→ items: [{"menuName": "Coca Cola Lata", "quantity": 1}] (específico, não ambíguo)
-
-REGRA DE OURO: 
-- Só retorne produtos que EXISTEM no cardápio fornecido
-- Produtos inexistentes no cardápio = IGNORAR COMPLETAMENTE (não retornar)  
-- 1 produto encontrado = SEMPRE item direto (NUNCA ambiguidade)
-- 2+ produtos encontrados = ambiguidade obrigatória
-- Ambiguidades com apenas 1 item são ERRO - deve ser item direto
-- JAMAIS invente ou assuma produtos que não estão no cardápio JSON fornecido
+JSON: {"items": [{"menuId": number, "menuName": "string", "quantity": number, "palavra": "string", "price": number}], "ambiguidades": [{"id": "string", "palavra": "string", "quantity": number, "items": [{"menuId": number, "menuName": "string", "price": number}]}]}
 `;
 
   try {

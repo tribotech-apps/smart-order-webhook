@@ -371,11 +371,14 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
         // Loja Aberta
         let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
         const user = await (0, userController_1.getUserByPhone)(from);
+        if (!currentConversation) {
+            // TODO: handle;
+            console.log('Nenhuma conversa recente encontrada para o número:', from);
+            return;
+        }
         // verifica tipo de entrega desejado
         if (currentConversation?.flow === 'WELCOME') {
             const messageIntention = await (0, messageHelper_1.classifyCustomerIntent)(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
-            console.log('MESSAGE INTENTION ', messageIntention);
-            console.log('**************************', messageIntention.intent);
             switch (messageIntention.intent) {
                 case "greeting":
                 case "other":
@@ -417,8 +420,6 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
             }
             return;
         }
-        if (!currentConversation)
-            return;
         // verifica se e confirmacao de endereco
         if (currentConversation?.flow === 'NEW_ADDRESS') {
             console.log('---------new ADDRESS---------', message?.text?.body);
@@ -562,7 +563,6 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                         }
                     }
                 }
-                // AQUI*
                 // Delivery - Endereco obtido - processar produtos da mensagem original
                 await (0, conversationController_1.updateConversation)(currentConversation, {
                     deliveryOption: 'delivery',
@@ -942,13 +942,11 @@ async function handleIncomingTextMessage(from, message, store, res, name, addres
                     await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
                     return;
                 }
-                console.log('DIZAAAAAAA', message.text.body || "", currentRefinment.items);
                 const multipleProductsFromMessage = await (0, messageHelper_1.selectMultipleOptionsByAI)(message.text.body || "", currentRefinment.items.map(item => ({
                     menuId: item.menuId,
                     menuName: item.menuName,
                     price: item.price
                 })), currentRefinment.quantity || 1);
-                console.log('MULTIPLE PRODUCTS FROM MESSAGE', multipleProductsFromMessage);
                 if (multipleProductsFromMessage && multipleProductsFromMessage.answers.length > 0) {
                     // Cliente escolheu produtos específicos - converter para formato esperado
                     const resolvedItems = multipleProductsFromMessage.answers.map(answer => {

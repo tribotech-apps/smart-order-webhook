@@ -373,10 +373,28 @@ router.post('/webhook', async (req, res) => {
 
             let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
 
+            // Check opening hour
+            const storeStatus = getStoreStatus(store);
+            console.log('STATUS DA LOJA', storeStatus)
+
+            if (storeStatus !== 'ABERTA') {
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: {
+                  body: 'Olá, a loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
+                },
+              }, store.wabaEnvironments);
+
+              return;
+            }
+
             if (!currentConversation) {
               const activeOrder = await getActiveOrder(from, store._id);
-              console.log('COMPRAS ANTIGAS', currentConversation, activeOrder)
               if (activeOrder) {
+                console.log('COMPRAS ANTIGAS', currentConversation, activeOrder)
+
                 // Envia mensagem sobre o status do pedido atual e se quer cancelar
                 const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`
                 const messagePayload: any = {
@@ -421,26 +439,9 @@ router.post('/webhook', async (req, res) => {
 
                 await (sendMessage(messagePayload, store.wabaEnvironments))
                 return;
-
               }
 
-
-              // Check opening hour
-              const storeStatus = getStoreStatus(store);
-              console.log('STATUS DA LOJA', storeStatus)
-
-              if (storeStatus !== 'ABERTA') {
-                await sendMessage({
-                  messaging_product: 'whatsapp',
-                  to: "+" + from,
-                  type: 'text',
-                  text: {
-                    body: 'Olá, a loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
-                  },
-                }, store.wabaEnvironments);
-
-                return;
-              }
+              // ----- Novo Pedido -----
 
               const flowToken = uuidv4(); // ou outro gerador de token
 
@@ -463,10 +464,8 @@ router.post('/webhook', async (req, res) => {
                 newConversation.address = userFrom.address;
               }
 
-
               const docId = await createConversation(newConversation);
               currentConversation = { ...newConversation, docId };
-
 
               await sendMessage({
                 messaging_product: 'whatsapp',
@@ -479,18 +478,16 @@ router.post('/webhook', async (req, res) => {
               const messageIntention = await classifyCustomerIntent(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
 
               console.log('MESSAGE INTENTION ', messageIntention)
-              console.log('**************************', messageIntention.intent)
-              console.log('VAI ENTRAR NO SWITCH', messageIntention.intent === "ordering_products")
 
               switch (messageIntention.intent) {
                 case "greeting":
                 case "other":
-                  // await sendMessage({
-                  //   messaging_product: 'whatsapp',
-                  //   to: "+" + from,
-                  //   type: 'text',
-                  //   text: { body: `✅ Olá, tudo bem? Este canal é exclusivo para pedidos delivery. O que gostaria de pedir hoje?` }
-                  // }, store.wabaEnvironments);
+                  await sendMessage({
+                    messaging_product: 'whatsapp',
+                    to: "+" + from,
+                    type: 'text',
+                    text: { body: `✅ Olá, tudo bem? Este canal é exclusivo para pedidos delivery. O que gostaria de pedir hoje?` }
+                  }, store.wabaEnvironments);
 
                   break;
                 case "want_menu_or_start":
@@ -506,14 +503,12 @@ router.post('/webhook', async (req, res) => {
                   }
 
                   // Save message in conversartions
-                  // await updateConversation(currentConversation, {
-                  //   flow: 'CATEGORIES'
-                  // })
+                  await updateConversation(currentConversation, {
+                    flow: 'CATEGORIES'
+                  })
 
                   break;
                 case "ordering_products":
-                  console.log('VAI ENVIAR TIPO DE ENTREGA ---->')
-
                   // Save message in conversartions
                   await updateConversation(currentConversation, {
                     lastMessage: message.text.body,
@@ -542,13 +537,43 @@ router.post('/webhook', async (req, res) => {
               return;
             }
 
+
+            // ----- Message Continuation -----
+
             const userFrom = await getUserByPhone(from);
 
             await handleIncomingTextMessage(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
             return;
           }
 
-          // //**** MENSAGEM INTERATIVA, DELIVERY OR COUNTER ******/
+          // //**** MENSAGEM INTERATIVA, START NEW ORDER ******/
+          if (message.interactive?.type === 'button_reply' && (message.interactive?.button_reply?.id === 'start_new_order')) {
+            let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
+
+            if (!currentConversation) {
+              // TODO: handle
+              return;
+            };
+
+            // Enviar cardápio formatado para o cliente
+            if (store.wabaEnvironments) {
+              const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu) || []);
+
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅Segue nosso cardápio**.\n\n${beautifulMenu}` }
+              }, store.wabaEnvironments);
+            }
+
+            await updateConversation(currentConversation, {
+              flow: 'CATEGORIES'
+            });
+
+            return;
+          }
+
           // if (message.interactive?.type === 'button_reply' &&
           //   (message.interactive?.button_reply?.id === 'delivery' || message.interactive?.button_reply?.id === 'counter')) {
 

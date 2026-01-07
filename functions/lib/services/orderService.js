@@ -119,10 +119,8 @@ function filterMenuByWeekday(menu) {
         if (item.allDays) {
             return true;
         }
-        console.log('---()---', item.weekdays);
         // Se allDays é false, verificar se o dia atual está no array weekdays
         if (item.weekdays && Array.isArray(item.weekdays)) {
-            console.log('---$$$$$$$$$$$$---', item.weekdays.includes(currentWeekday));
             return item.weekdays.includes(currentWeekday);
         }
         // Se allDays é false mas não tem weekdays definido, não mostrar o item

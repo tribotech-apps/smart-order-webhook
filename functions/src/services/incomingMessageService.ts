@@ -470,13 +470,15 @@ export async function handleIncomingTextMessage(
 
     const user = await getUserByPhone(from);
 
+    if (!currentConversation) {
+      // TODO: handle;
+      console.log('Nenhuma conversa recente encontrada para o número:', from);
+      return;
+    }
+
     // verifica tipo de entrega desejado
     if (currentConversation?.flow === 'WELCOME') {
-
       const messageIntention = await classifyCustomerIntent(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
-
-      console.log('MESSAGE INTENTION ', messageIntention)
-      console.log('**************************', messageIntention.intent)
 
       switch (messageIntention.intent) {
         case "greeting":
@@ -523,8 +525,6 @@ export async function handleIncomingTextMessage(
 
       return;
     }
-
-    if (!currentConversation) return;
 
     // verifica se e confirmacao de endereco
     if (currentConversation?.flow === 'NEW_ADDRESS') {
@@ -710,7 +710,6 @@ export async function handleIncomingTextMessage(
           }
         }
 
-        // AQUI*
         // Delivery - Endereco obtido - processar produtos da mensagem original
         await updateConversation(currentConversation, {
           deliveryOption: 'delivery',
@@ -725,7 +724,6 @@ export async function handleIncomingTextMessage(
 
           if (extractedProducts?.ambiguidades?.length) {
             const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
-
 
             if (itensAmbiguos?.length > 1) {
               extractedProducts.ambiguidades[0].refining = true;
@@ -781,7 +779,6 @@ export async function handleIncomingTextMessage(
           await updateConversation(currentConversation, { flow: 'CATEGORIES' });
 
           // Cliente já tem endereço confirmado pelo sistema
-
           const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
 
           // Atualizar histórico da conversa
@@ -1169,8 +1166,6 @@ export async function handleIncomingTextMessage(
           return;
         }
 
-        console.log('DIZAAAAAAA', message.text.body || "", currentRefinment.items)
-
         const multipleProductsFromMessage = await selectMultipleOptionsByAI(
           message.text.body || "",
           currentRefinment.items.map(item => ({
@@ -1180,8 +1175,6 @@ export async function handleIncomingTextMessage(
           })),
           currentRefinment.quantity || 1
         );
-
-        console.log('MULTIPLE PRODUCTS FROM MESSAGE', multipleProductsFromMessage)
 
         if (multipleProductsFromMessage && multipleProductsFromMessage.answers.length > 0) {
           // Cliente escolheu produtos específicos - converter para formato esperado
