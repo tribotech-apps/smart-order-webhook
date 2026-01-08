@@ -376,15 +376,16 @@ async function interpretOrderConfirmation(userResponse) {
 
 O cliente foi perguntado se confirma um pedido específico. Você deve analisar a resposta e classificar em uma das categorias:
 
-1. CONFIRMED - Cliente confirmou (sim, ok, correto, pode adicionar, etc.)
+1. CONFIRMED - Cliente confirmou (sim, ok, correto, pode adicionar, etc.) - MESMO se houver conteúdo adicional
 2. REJECTED - Cliente rejeitou sem fazer novo pedido (não, não quero, cancela, etc.)  
 3. NEW_ORDER - Cliente rejeitou E está fazendo um novo pedido na mesma mensagem
+4. CONFIRMED_WITH_ADDITION - Cliente confirmou E está adicionando mais itens na mesma mensagem
 
 RESPONDA EM JSON:
 {
-  "type": "CONFIRMED" | "REJECTED" | "NEW_ORDER",
+  "type": "CONFIRMED" | "REJECTED" | "NEW_ORDER" | "CONFIRMED_WITH_ADDITION",
   "response": string, // interpretação da resposta
-  "newOrderText": string | null // se NEW_ORDER, extrair o texto do novo pedido
+  "newOrderText": string | null // se NEW_ORDER ou CONFIRMED_WITH_ADDITION, extrair o texto do novo pedido
 }
 
 EXEMPLOS:
@@ -393,12 +394,17 @@ Cliente: "sim" → {"type": "CONFIRMED", "response": "confirmado", "newOrderText
 Cliente: "ok" → {"type": "CONFIRMED", "response": "confirmado", "newOrderText": null}
 Cliente: "pode adicionar" → {"type": "CONFIRMED", "response": "confirmado", "newOrderText": null}
 
+Cliente: "sim, e quero mais uma coca" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "quero mais uma coca"}
+Cliente: "ok, e adiciona uma pizza" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "adiciona uma pizza"}
+
 Cliente: "não" → {"type": "REJECTED", "response": "rejeitado", "newOrderText": null}
 Cliente: "não quero" → {"type": "REJECTED", "response": "rejeitado", "newOrderText": null}
 
 Cliente: "não, quero o médio" → {"type": "NEW_ORDER", "response": "rejeitou e fez novo pedido", "newOrderText": "quero o médio"}
 Cliente: "não quero pequeno, quero marmitex médio e duas cocas" → {"type": "NEW_ORDER", "response": "rejeitou e fez novo pedido", "newOrderText": "quero marmitex médio e duas cocas"}
 Cliente: "na verdade quero uma pizza" → {"type": "NEW_ORDER", "response": "rejeitou e fez novo pedido", "newOrderText": "quero uma pizza"}
+
+REGRA IMPORTANTE: Se a mensagem contém palavras de confirmação (sim, ok, correto, pode, etc.) no INÍCIO, sempre considere como confirmação, mesmo se houver conteúdo adicional.
 
 Retorne APENAS o JSON, sem texto adicional.`;
     try {
@@ -440,25 +446,53 @@ TAREFA: Identifique produtos do cardápio na mensagem do cliente.
 
 REGRA CRÍTICA: Processe cada produto individualmente. Se um não existir, ignore-o e continue com os outros.
 
-CARDÁPIO:
+CARDÁPIO COMPLETO COM PERGUNTAS E RESPOSTAS:
 ${JSON.stringify(cardapio, null, 2)}
 
 ALGORITMO:
-1. Divida a mensagem em produtos (ex: "pizza, 2 guaranás, coca" = 3 produtos)
+1. Divida a mensagem em produtos (ex: "marmitex médio e sorvete de chocolate" = 2 produtos: "marmitex médio", "sorvete de chocolate")
 2. Para cada produto: busque nome similar no cardápio (ignore acentos/case)
-3. "sorvete de chocolate" → busque "sorvete sabores"
-4. Decisão: 0 match = ignore | 1 match = item direto | 2+ matches = ambiguidade
+   IMPORTANTE: "sorvete de chocolate" deve buscar por "sorvete" no cardápio
+3. Decisão: 0 match = ignore | 1 match = item direto | 2+ matches = ambiguidade
+4. Para items diretos com questions/answers: REGRAS CRÍTICAS PARA MÚLTIPLOS PRODUTOS
+   - QUANDO há MÚLTIPLOS produtos na mensagem: seja EXTRA conservador
+   - SE qualquer produto tem perguntas obrigatórias não especificamente mencionadas → AMBIGUIDADES
+   - "marmitex médio e sorvete" → "marmitex médio" precisa de carne = AMBIGUIDADE
+   - "marmitex médio com frango e sorvete" → carne especificada = pode ser item direto
+   - Para múltiplos produtos, NÃO assuma respostas - cliente deve ser específico
+   - NUNCA invente respostas quando há múltiplos produtos na mensagem
 
-EXEMPLOS:
-"pizza, 2 guaranás, coca" com cardápio ["Guaraná Lata", "Coca Lata"]
-→ items: [{"menuName": "Guaraná Lata", "quantity": 2}, {"menuName": "Coca Lata", "quantity": 1}]
-→ ambiguidades: [] (pizza ignorada)
+EXEMPLOS CORRETOS:
 
-"coca" com cardápio ["Coca Lata", "Coca 1 Litro"] 
+PRODUTO ÚNICO (mais permissivo):
+"marmitex médio" com produto que tem pergunta obrigatória "Escolha a carne" 
 → items: []
-→ ambiguidades: [{"palavra": "coca", "quantity": 1, "items": [ambas as cocas]}] (múltiplas opções = ambiguidade)
+→ ambiguidades: [{"palavra": "marmitex médio", "quantity": 1, "items": [produto]}] (precisa escolher carne)
 
-JSON: {"items": [{"menuId": number, "menuName": "string", "quantity": number, "palavra": "string", "price": number}], "ambiguidades": [{"id": "string", "palavra": "string", "quantity": number, "items": [{"menuId": number, "menuName": "string", "price": number}]}]}
+"sorvete de chocolate" com produto que tem pergunta opcional de sabor
+→ items: [{"menuName": "Sorvete", "quantity": 1, "selectedAnswers": [{"questionId": [ID_REAL], "answerId": [ID_REAL], "answerName": "Chocolate"}]}]
+
+MÚLTIPLOS PRODUTOS (extra conservador):
+"marmitex médio e sorvete de chocolate" = 2 produtos com perguntas
+→ items: [] (NÃO adicione nada direto)
+→ ambiguidades: [
+    {"palavra": "marmitex médio", "quantity": 1, "items": [produto1]},
+    {"palavra": "sorvete de chocolate", "quantity": 1, "items": [produto2]}
+] (cliente deve escolher especificações para cada produto separadamente)
+
+"2 guaranás e coca" = produtos SEM perguntas
+→ items: [{"menuName": "Guaraná Lata", "quantity": 2}, {"menuName": "Coca Lata", "quantity": 1}]
+→ ambiguidades: [] (produtos simples podem ir direto)
+
+"marmitex médio com frango e sorvete de chocolate" = especificação clara
+→ items: [{"menuName": "Marmitex Médio", "selectedAnswers": [frango]}, {"menuName": "Sorvete", "selectedAnswers": [chocolate]}]
+
+REGRA CRÍTICA: Se um produto tem perguntas obrigatórias (minAnswerRequired > 0) não respondidas pelo cliente, SEMPRE coloque em ambiguidades para o cliente escolher depois.
+
+JSON: {
+  "items": [{"menuId": number, "menuName": "string", "quantity": number, "palavra": "string", "price": number, "selectedAnswers"?: [{"questionId": number, "answerId": number, "answerName": "string", "quantity"?: number, "price"?: number}]}],
+  "ambiguidades": [{"id": "string", "palavra": "string", "quantity": number, "items": [{"menuId": number, "menuName": "string", "price": number}]}]
+}
 `;
     try {
         const response = await openai.chat.completions.create({
@@ -493,7 +527,8 @@ JSON: {"items": [{"menuId": number, "menuName": "string", "quantity": number, "p
                     menuName: item.menuName,
                     quantity: ambiguidade.quantity || 1,
                     palavra: ambiguidade.palavra,
-                    price: item.price
+                    price: item.price,
+                    selectedAnswers: item.selectedAnswers
                 });
             }
             else if (ambiguidade.items && ambiguidade.items.length > 1) {

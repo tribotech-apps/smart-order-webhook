@@ -61,6 +61,7 @@ require("firebase-functions/logger/compat");
 const messagingService_1 = require("../../services/messagingService");
 // import { buildCartTableString, buildCartTableStringFromRichText, redirectToOrderSummary } from '../../services/shoppingService';
 const incomingMessageService_1 = require("../../services/incomingMessageService");
+const concurrencyControl_1 = require("../../utils/concurrencyControl");
 const secret_manager_1 = require("@google-cloud/secret-manager");
 const userController_1 = require("../../controllers/userController");
 const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js");
@@ -280,206 +281,194 @@ router.post('/webhook', async (req, res) => {
                     }
                     //**** MENSAGEM DE TEXTO OU VOZ ******/
                     if (!message?.interactive) {
-                        // Check if it's a voice message and convert to text
-                        if ((0, audioService_1.isVoiceMessage)(message)) {
-                            try {
-                                console.log('🎤 Mensagem de voz recebida, iniciando transcrição...');
-                                const audioData = (0, audioService_1.extractAudioFromMessage)(message);
-                                if (!audioData) {
-                                    console.error('Erro: Não foi possível extrair dados do áudio');
+                        // Use lock to prevent concurrent message processing for the same user
+                        const lockKey = (0, concurrencyControl_1.generateLockKey)(from, store._id);
+                        const wabaEnv = store.wabaEnvironments; // Capture reference before async context
+                        await (0, concurrencyControl_1.withLock)(lockKey, async () => {
+                            // Check if it's a voice message and convert to text
+                            if ((0, audioService_1.isVoiceMessage)(message)) {
+                                try {
+                                    console.log('🎤 Mensagem de voz recebida, iniciando transcrição...');
+                                    const audioData = (0, audioService_1.extractAudioFromMessage)(message);
+                                    if (!audioData) {
+                                        console.error('Erro: Não foi possível extrair dados do áudio');
+                                        return;
+                                    }
+                                    const transcription = await (0, audioService_1.processVoiceMessage)(audioData, store);
+                                    console.log('✅ Transcrição concluída:', transcription);
+                                    // Replace message content with transcribed text to continue normal flow
+                                    message.text = { body: transcription };
+                                    message.type = 'text'; // Change type to text so it continues in text flow
+                                    // Send confirmation to user that voice was processed
+                                    // await sendMessage({
+                                    //   messaging_product: 'whatsapp',
+                                    //   to: "+" + from,
+                                    //   type: 'text',
+                                    //   text: { body: `🎤 _Entendi: "${transcription}"_` }
+                                    // }, store.wabaEnvironments);
+                                }
+                                catch (error) {
+                                    console.error('❌ Erro ao processar mensagem de voz:', error);
+                                    await (0, messagingService_1.sendMessage)({
+                                        messaging_product: 'whatsapp',
+                                        to: "+" + from,
+                                        type: 'text',
+                                        text: { body: '🎤 Desculpe, não consegui entender sua mensagem de voz. Pode enviar uma mensagem de texto?' }
+                                    }, wabaEnv);
                                     return;
                                 }
-                                const transcription = await (0, audioService_1.processVoiceMessage)(audioData, store);
-                                console.log('✅ Transcrição concluída:', transcription);
-                                // Replace message content with transcribed text to continue normal flow
-                                message.text = { body: transcription };
-                                message.type = 'text'; // Change type to text so it continues in text flow
-                                // Send confirmation to user that voice was processed
-                                // await sendMessage({
-                                //   messaging_product: 'whatsapp',
-                                //   to: "+" + from,
-                                //   type: 'text',
-                                //   text: { body: `🎤 _Entendi: "${transcription}"_` }
-                                // }, store.wabaEnvironments);
                             }
-                            catch (error) {
-                                console.error('❌ Erro ao processar mensagem de voz:', error);
+                            let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
+                            // Check opening hour
+                            const storeStatus = (0, storeController_1.getStoreStatus)(store);
+                            console.log('STATUS DA LOJA', storeStatus);
+                            if (storeStatus !== 'ABERTA') {
                                 await (0, messagingService_1.sendMessage)({
                                     messaging_product: 'whatsapp',
                                     to: "+" + from,
                                     type: 'text',
-                                    text: { body: '🎤 Desculpe, não consegui entender sua mensagem de voz. Pode enviar uma mensagem de texto?' }
-                                }, store.wabaEnvironments);
+                                    text: {
+                                        body: 'Olá, a loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
+                                    },
+                                }, wabaEnv);
                                 return;
                             }
-                        }
-                        let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
-                        // Check opening hour
-                        const storeStatus = (0, storeController_1.getStoreStatus)(store);
-                        console.log('STATUS DA LOJA', storeStatus);
-                        if (storeStatus !== 'ABERTA') {
-                            await (0, messagingService_1.sendMessage)({
-                                messaging_product: 'whatsapp',
-                                to: "+" + from,
-                                type: 'text',
-                                text: {
-                                    body: 'Olá, a loja está fechada no momento, nosso horário de atendimento é de segunda à sexta, das 08:00 as 19:00 e aos sábados, das 08:00 às 12:00.\nAgradecemos a preferência.',
-                                },
-                            }, store.wabaEnvironments);
-                            return;
-                        }
-                        if (!currentConversation) {
-                            const activeOrder = await (0, ordersController_1.getActiveOrder)(from, store._id);
-                            if (activeOrder) {
-                                console.log('COMPRAS ANTIGAS', currentConversation, activeOrder);
-                                // Envia mensagem sobre o status do pedido atual e se quer cancelar
-                                const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`;
-                                const messagePayload = {
-                                    messaging_product: 'whatsapp',
-                                    to: '+' + from,
-                                    type: 'interactive',
-                                    interactive: {
-                                        type: 'button',
-                                        body: {
-                                            text: responseMessage
-                                        },
-                                        action: {
-                                            buttons: [
-                                                {
-                                                    type: 'reply',
-                                                    reply: {
-                                                        id: 'start_new_order',
-                                                        title: 'Fazer novo Pedido'
-                                                    }
-                                                },
-                                                {
-                                                    type: 'reply',
-                                                    reply: {
-                                                        id: 'cancel_order',
-                                                        title: 'Cancelar Pedido'
-                                                    }
-                                                },
-                                            ]
-                                        }
-                                    }
-                                };
-                                // Adicionar header com logo da loja se disponível
-                                if (store.logo) {
-                                    messagePayload.interactive.header = {
-                                        type: 'image',
-                                        image: {
-                                            link: store.logo
-                                        }
-                                    };
-                                }
-                                await ((0, messagingService_1.sendMessage)(messagePayload, store.wabaEnvironments));
-                                return;
-                            }
-                            // ----- Novo Pedido -----
-                            const flowToken = (0, uuid_1.v4)(); // ou outro gerador de token
-                            // Start new conversation
-                            const newConversation = {
-                                date: new Date(),
-                                phoneNumber: from,
-                                flow: 'WELCOME',
-                                selectedAnswers: [],
-                                deliveryPrice: store.deliveryPrice,
-                                flowToken,
-                                customerName,
-                                store,
-                                message,
-                            };
-                            const userFrom = await (0, userController_1.getUserByPhone)(from);
-                            if (userFrom?.address) {
-                                newConversation.address = userFrom.address;
-                            }
-                            const docId = await (0, conversationController_1.createConversation)(newConversation);
-                            currentConversation = { ...newConversation, docId };
-                            await (0, messagingService_1.sendMessage)({
-                                messaging_product: 'whatsapp',
-                                to: "+" + from,
-                                type: 'text',
-                                text: { body: `✅ Olá, tudo bem? Obrigado pela visita. Este canal é exclusivo para pedidos delivery.` }
-                            }, store.wabaEnvironments);
-                            const messageIntention = await (0, messageHelper_1.classifyCustomerIntent)(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
-                            console.log('MESSAGE INTENTION ', messageIntention);
-                            switch (messageIntention.intent) {
-                                case "greeting":
-                                case "other":
+                            if (!currentConversation) {
+                                const activeOrder = await (0, ordersController_1.getActiveOrder)(from, store._id);
+                                if (activeOrder) {
+                                    console.log('COMPRAS ANTIGAS', currentConversation, activeOrder);
+                                    // Envia mensagem sobre o status do pedido atual e se quer cancelar
+                                    // const responseMessage = `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}`
+                                    // const messagePayload: any = {
+                                    //   messaging_product: 'whatsapp',
+                                    //   to: '+' + from,
+                                    //   type: 'interactive',
+                                    //   interactive: {
+                                    //     type: 'button',
+                                    //     body: {
+                                    //       text: responseMessage
+                                    //     },
+                                    //     action: {
+                                    //       buttons: [
+                                    //         {
+                                    //           type: 'reply',
+                                    //           reply: {
+                                    //             id: 'start_new_order',
+                                    //             title: 'Fazer novo Pedido'
+                                    //           }
+                                    //         },
+                                    //         {
+                                    //           type: 'reply',
+                                    //           reply: {
+                                    //             id: 'cancel_order',
+                                    //             title: 'Cancelar Pedido'
+                                    //           }
+                                    //         },
+                                    //       ]
+                                    //     }
+                                    //   }
+                                    // };
+                                    // // Adicionar header com logo da loja se disponível
+                                    // if (store.logo) {
+                                    //   messagePayload.interactive.header = {
+                                    //     type: 'image',
+                                    //     image: {
+                                    //       link: store.logo
+                                    //     }
+                                    //   };
+                                    // }
+                                    // await (sendMessage(messagePayload, wabaEnv!))
                                     await (0, messagingService_1.sendMessage)({
                                         messaging_product: 'whatsapp',
                                         to: "+" + from,
                                         type: 'text',
-                                        text: { body: `✅ Olá, tudo bem? Este canal é exclusivo para pedidos delivery. O que gostaria de pedir hoje?` }
-                                    }, store.wabaEnvironments);
-                                    break;
-                                case "want_menu_or_start":
-                                    const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu) || []);
-                                    // Enviar cardápio formatado para o cliente
-                                    if (store.wabaEnvironments) {
+                                        text: { body: `Seu pedido está ${activeOrder.currentFlow.flowId === 1 ? 'Aguardando Confirmacao' : activeOrder.currentFlow.flowId === 2 ? 'Em preparação' : activeOrder.currentFlow.flowId === 3 ? 'Em rota de entrega' : activeOrder.currentFlow.flowId === 4 ? 'Entregue' : 'Cancelado'}` }
+                                    }, wabaEnv);
+                                    // return;
+                                }
+                                // ----- Novo Pedido -----
+                                const flowToken = (0, uuid_1.v4)(); // ou outro gerador de token
+                                // Start new conversation
+                                const newConversation = {
+                                    date: new Date(),
+                                    phoneNumber: from,
+                                    flow: 'WELCOME',
+                                    selectedAnswers: [],
+                                    deliveryPrice: store.deliveryPrice,
+                                    flowToken,
+                                    customerName,
+                                    store,
+                                    message,
+                                };
+                                const userFrom = await (0, userController_1.getUserByPhone)(from);
+                                if (userFrom?.address) {
+                                    newConversation.address = userFrom.address;
+                                }
+                                const docId = await (0, conversationController_1.createConversation)(newConversation);
+                                currentConversation = { ...newConversation, docId };
+                                await (0, messagingService_1.sendMessage)({
+                                    messaging_product: 'whatsapp',
+                                    to: "+" + from,
+                                    type: 'text',
+                                    text: { body: `✅ Olá, tudo bem? Obrigado pela visita. Este canal é exclusivo para pedidos delivery. Um momento, por favor...` }
+                                }, wabaEnv);
+                                const messageIntention = await (0, messageHelper_1.classifyCustomerIntent)(message.text.body, currentConversation?.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
+                                console.log('MESSAGE INTENTION ', messageIntention);
+                                switch (messageIntention.intent) {
+                                    case "greeting":
+                                    case "other":
                                         await (0, messagingService_1.sendMessage)({
                                             messaging_product: 'whatsapp',
                                             to: "+" + from,
                                             type: 'text',
-                                            text: { body: `✅Segue nosso cardápio**.\n\n${beautifulMenu}` }
-                                        }, store.wabaEnvironments);
-                                    }
-                                    // Save message in conversartions
-                                    await (0, conversationController_1.updateConversation)(currentConversation, {
-                                        flow: 'CATEGORIES'
-                                    });
-                                    break;
-                                case "ordering_products":
-                                    // Save message in conversartions
-                                    await (0, conversationController_1.updateConversation)(currentConversation, {
-                                        lastMessage: message.text.body,
-                                        flow: 'DELIVERY_TYPE'
-                                    });
-                                    //Send delivery type message 
-                                    await (0, messagingService_1.sendMessage)({
-                                        messaging_product: 'whatsapp',
-                                        to: "+" + from,
-                                        type: 'text',
-                                        text: { body: '🚚 Seu pedido é para **entrega** ou **retirada** na loja?' }
-                                    }, store.wabaEnvironments);
-                                    break;
-                                case "close_order":
-                                    break;
-                                case "change_quantity":
-                                    break;
-                                case "replace_product":
-                                    break;
-                                case "remove_product":
-                                    break;
+                                            text: { body: `✅ O que gostaria de pedir hoje?` }
+                                        }, wabaEnv);
+                                        break;
+                                    case "want_menu_or_start":
+                                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu) || []);
+                                        // Enviar cardápio formatado para o cliente
+                                        if (store.wabaEnvironments) {
+                                            await (0, messagingService_1.sendMessage)({
+                                                messaging_product: 'whatsapp',
+                                                to: "+" + from,
+                                                type: 'text',
+                                                text: { body: `✅Segue nosso cardápio**.\n\n${beautifulMenu}` }
+                                            }, wabaEnv);
+                                        }
+                                        // Save message in conversartions
+                                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                                            flow: 'CATEGORIES'
+                                        });
+                                        break;
+                                    case "ordering_products":
+                                        // Save message in conversartions
+                                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                                            lastMessage: message.text.body,
+                                            flow: 'DELIVERY_TYPE'
+                                        });
+                                        //Send delivery type message 
+                                        await (0, messagingService_1.sendMessage)({
+                                            messaging_product: 'whatsapp',
+                                            to: "+" + from,
+                                            type: 'text',
+                                            text: { body: '🚚 Seu pedido é para **entrega** ou **retirada** na loja?' }
+                                        }, wabaEnv);
+                                        break;
+                                    case "close_order":
+                                        break;
+                                    case "change_quantity":
+                                        break;
+                                    case "replace_product":
+                                        break;
+                                    case "remove_product":
+                                        break;
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        // ----- Message Continuation -----
-                        const userFrom = await (0, userController_1.getUserByPhone)(from);
-                        await (0, incomingMessageService_1.handleIncomingTextMessage)(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
-                        return;
-                    }
-                    // //**** MENSAGEM INTERATIVA, START NEW ORDER ******/
-                    if (message.interactive?.type === 'button_reply' && (message.interactive?.button_reply?.id === 'start_new_order')) {
-                        let currentConversation = await (0, conversationController_1.getRecentConversation)(from, store._id);
-                        if (!currentConversation) {
-                            // TODO: handle
-                            return;
-                        }
-                        ;
-                        // Enviar cardápio formatado para o cliente
-                        if (store.wabaEnvironments) {
-                            const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu) || []);
-                            await (0, messagingService_1.sendMessage)({
-                                messaging_product: 'whatsapp',
-                                to: "+" + from,
-                                type: 'text',
-                                text: { body: `✅Segue nosso cardápio**.\n\n${beautifulMenu}` }
-                            }, store.wabaEnvironments);
-                        }
-                        await (0, conversationController_1.updateConversation)(currentConversation, {
-                            flow: 'CATEGORIES'
-                        });
+                            // ----- Message Continuation -----
+                            const userFrom = await (0, userController_1.getUserByPhone)(from);
+                            await (0, incomingMessageService_1.handleIncomingTextMessage)(from, message, store, res, customerName || 'Consumidor', userFrom?.address);
+                        }); // Fim do withLock
                         return;
                     }
                     // if (message.interactive?.type === 'button_reply' &&

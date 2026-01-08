@@ -1,5 +1,6 @@
 import { Timestamp } from "firebase/firestore";
 import { Address } from "./User";
+import { SelectedAnswer } from "./Conversation";
 
 export interface OpeningException {
   day: Timestamp;
@@ -158,6 +159,7 @@ export type StoreStatus = 'ABERTA' | 'FECHADA';
 export interface ShoppingCartItem extends MenuItem {
   id: string;
   quantity: number;
+  selectedAnswers?: SelectedAnswer[]
 }
 
 export interface ShoppingCartItemShort {

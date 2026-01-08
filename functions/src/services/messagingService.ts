@@ -119,16 +119,16 @@ export const sendDeliveryMessage = async (phoneNumber: string, wabaEnvironments:
   await sendMessage(messagePayload, wabaEnvironments);
 };
 
-export const sendDeliveredMessage = async (phoneNumber: string, wabaEnvironments: WABAEnvironments): Promise<void> => {
-  // console.log('Enviando mensagem para informacao da confirmacao...');
-  // console.log('Número de telefone:', phoneNumber);
+export const sendDeliveredMessage = async (phoneNumber: string, wabaEnvironments: WABAEnvironments, orderNumber: string, deliveryOption: 'DELIVERY' | 'COUNTER'): Promise<void> => {
+
+  const body = deliveryOption === 'DELIVERY' ? `Seu pedido ${orderNumber} foi entregue. Obrigado pela confiança, estamos à disposição!` : `Seu pedido ${orderNumber} está disponivel para retirada na loja. Obrigado pela confiança, estamos à disposição!`
 
   const messagePayload = {
     messaging_product: 'whatsapp',
     to: phoneNumber,
     type: 'text',
     text: {
-      body: 'Seu pedido foi entregue. Obrigado pela confiança, estamos à disposição!'
+      body
     }
   };
 

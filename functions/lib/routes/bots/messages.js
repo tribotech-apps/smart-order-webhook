@@ -101,12 +101,14 @@ router.post('/sendOrderDeliveryRoute', async (req, res) => {
 router.post('/sendOrderDelivered', async (req, res) => {
     const { to, name } = req.body;
     const wabaEnvironments = req.body.wabaEnvironments || null;
-    if (!wabaEnvironments) {
-        res.status(400).send({ error: 'wabaEnvironments não encontrado.' });
+    const deliveryOption = req.body.deliveryOption || null;
+    const orderNumber = req.body.orderNumber || null;
+    if (!wabaEnvironments || !deliveryOption || !orderNumber) {
+        res.status(400).send({ error: 'wabaEnvironments, orderNumber ou deliveryOption não encontrados.' });
         return;
     }
     try {
-        (0, messagingService_js_1.sendDeliveredMessage)(to, wabaEnvironments);
+        (0, messagingService_js_1.sendDeliveredMessage)(to, wabaEnvironments, orderNumber, deliveryOption);
         res.status(200);
     }
     catch (error) {

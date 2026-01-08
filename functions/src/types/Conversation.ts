@@ -100,6 +100,14 @@ export interface ResolvedItem {
   quantity: number;
   palavra: string;
   price: number;
+  selectedAnswers?: SelectedAnswer[];
+}
+
+export interface SelectedAnswer {
+  questionId: number;
+  answerId: number;
+  answerName: string;
+  quantity?: number;
 }
 
 export interface AmbiguousItems {

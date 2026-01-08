@@ -2,18 +2,17 @@ import { createOrder } from '../controllers/ordersController';
 import { deleteConversation, getRecentConversation, updateConversation } from '../controllers/conversationController';
 import { sendMessage, notifyAdmin } from './messagingService';
 import { Conversation } from '../types/Conversation';
-import { ShoppingCartItem, Store } from '../types/Store';
+import { MenuItemAnswer, ShoppingCartItem, Store } from '../types/Store';
 import { Address } from '../types/User';
 import { getUserByPhone, updateUserAddress } from '../controllers/userController';
 import { getStoreStatus } from '../controllers/storeController';
 import OpenAI from "openai";
 import { Client, PlaceAutocompleteType } from '@googlemaps/google-maps-services-js';
+
 import { onInit } from 'firebase-functions/v2/core';
 import { v4 as uuidv4 } from 'uuid';
 
 import { classifyCustomerIntent, extractProductsFromMessageWithAI, selectMultipleOptionsByAI, interpretOrderConfirmation, identifyPaymentMethod, identifyDeliveryType } from './messageHelper';
-import { MenuItem, Weekday } from '../types/Store';
-import { Console } from 'console';
 import { filterMenuByWeekday } from './orderService';
 
 // Função para formatar o cardápio de forma bonita
@@ -113,6 +112,33 @@ function calculateItemTotalPrice(item: any): number {
   }
 
   return totalPrice;
+}
+
+// Função auxiliar para calcular preço de um item com selectedAnswers (formato da extração)
+function calculateItemPriceWithSelectedAnswers(item: any, menuData: any[]): number {
+  let basePrice = item.price * item.quantity;
+
+  if (item.selectedAnswers && Array.isArray(item.selectedAnswers)) {
+    // Buscar o produto no menu para ter acesso às perguntas e preços
+    const menuItem = menuData.find((menuProduct: any) => menuProduct.menuId === item.menuId);
+
+    if (menuItem && menuItem.questions) {
+      item.selectedAnswers.forEach((selectedAnswer: any) => {
+        // Encontrar a pergunta correspondente
+        const question = menuItem.questions.find((q: any) => q.questionId === selectedAnswer.questionId);
+        if (question && question.answers) {
+          // Encontrar a resposta correspondente
+          const originalAnswer = question.answers.find((a: any) => a.answerId === selectedAnswer.answerId);
+          if (originalAnswer && originalAnswer.price) {
+            const answerQuantity = selectedAnswer.quantity || 1;
+            basePrice += originalAnswer.price * answerQuantity * item.quantity;
+          }
+        }
+      });
+    }
+  }
+
+  return basePrice;
 }
 
 // Função auxiliar para gerar descrição detalhada de um item incluindo TODAS as respostas selecionadas
@@ -224,7 +250,8 @@ async function processNextProductInQueue(
       allDays: fullMenuItem.allDays || [],
       price: nextProduct.price,
       quantity: nextProduct.quantity,
-      questions: []
+      questions: [],
+      selectedAnswers: nextProduct.selectedAnswers?.map((answer: any) => answer.answerName) || []
     };
 
     cartItems.push(newCartItem);
@@ -239,6 +266,106 @@ async function processNextProductInQueue(
       to: "+" + from,
       type: 'text',
       text: { body: `✅ ${nextProduct.quantity}x ${nextProduct.menuName} adicionado ao pedido!` }
+    }, store.wabaEnvironments);
+
+    // Processar próximo produto
+    await processNextProductInQueue({ ...conversation, cartItems, pendingProductsQueue: remainingQueue }, store, from);
+    return;
+  }
+
+  // Check if extracted answers already satisfy question requirements
+  const extractedAnswers = nextProduct.selectedAnswers || [];
+  const questionsNeedingAnswers = fullMenuItem.questions.filter((question: any) => {
+    const currentQuestionAnswers = extractedAnswers.filter(answer => answer.questionId === question.questionId);
+    const totalAnswerQuantity = currentQuestionAnswers.reduce((sum, answer) => sum + (answer.quantity || 1), 0);
+    return totalAnswerQuantity < question.minAnswerRequired;
+  });
+
+  // If all required answers are already provided by AI extraction
+  if (questionsNeedingAnswers.length === 0) {
+    // Build cart item with extracted answers - include only selected answers
+    const structuredAnswers = fullMenuItem.questions.map((question: any) => {
+      const questionAnswers = extractedAnswers.filter(answer => answer.questionId === question.questionId);
+
+      if (questionAnswers.length === 0) {
+        return null; // No answers selected for this question
+      }
+
+      const selectedAnswersOnly = questionAnswers.map((selectedAnswer: any) => {
+        const originalAnswer = question.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+        return {
+          answerId: selectedAnswer.answerId,
+          answerName: selectedAnswer.answerName,
+          quantity: selectedAnswer.quantity || 1,
+          price: originalAnswer?.price || 0
+        };
+      });
+
+      return {
+        ...question,
+        answers: selectedAnswersOnly
+      };
+    }).filter((question: any) => question !== null); // Remove questions with no selected answers
+
+    const newCartItem: any = {
+      id: `${nextProduct.menuId}-${Date.now()}-${Math.random()}`,
+      menuId: nextProduct.menuId,
+      menuName: nextProduct.menuName,
+      menuDescription: fullMenuItem.menuDescription || '',
+      categoryId: fullMenuItem.categoryId || 0,
+      allDays: fullMenuItem.allDays || [],
+      price: nextProduct.price,
+      quantity: nextProduct.quantity,
+      questions: structuredAnswers,
+      selectedAnswers: extractedAnswers.map((answer: any) => answer.answerName) || []
+    };
+
+    cartItems.push(newCartItem);
+
+    // Generate description with extracted optionals and their prices for confirmation
+    let extractedDescription = '';
+    let additionalCost = 0;
+
+    if (extractedAnswers.length > 0) {
+      const answerDescriptions: string[] = [];
+
+      extractedAnswers.forEach((selectedAnswer: any) => {
+        // Find the original answer data to get the price
+        const question = fullMenuItem.questions.find((q: any) => q.questionId === selectedAnswer.questionId);
+        const originalAnswer = question?.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+
+        if (originalAnswer) {
+          const answerQuantity = selectedAnswer.quantity || 1;
+          if (originalAnswer.price && originalAnswer.price > 0) {
+            const answerTotal = originalAnswer.price * answerQuantity;
+            additionalCost += answerTotal;
+            answerDescriptions.push(`${selectedAnswer.answerName} (+R$ ${answerTotal.toFixed(2)})`);
+          } else {
+            answerDescriptions.push(selectedAnswer.answerName);
+          }
+        } else {
+          answerDescriptions.push(selectedAnswer.answerName);
+        }
+      });
+
+      extractedDescription = ` com ${answerDescriptions.join(', ')}`;
+    }
+
+    // Calculate total item cost including optionals
+    const itemBaseTotal = nextProduct.price * nextProduct.quantity;
+    const finalAdditionalCost = additionalCost * nextProduct.quantity;
+    const itemFinalTotal = itemBaseTotal + finalAdditionalCost;
+
+    await updateConversation(conversation, {
+      cartItems: cartItems,
+      pendingProductsQueue: remainingQueue
+    });
+
+    await sendMessage({
+      messaging_product: 'whatsapp',
+      to: "+" + from,
+      type: 'text',
+      text: { body: `✅ ${nextProduct.quantity}x ${nextProduct.menuName}${extractedDescription} adicionado ao pedido! - R$ ${itemFinalTotal.toFixed(2)}` }
     }, store.wabaEnvironments);
 
     // Processar próximo produto
@@ -265,7 +392,8 @@ async function processNextProductInQueue(
       allDays: fullMenuItem.allDays || true,
       price: nextProduct.price,
       quantity: nextProduct.quantity,
-      questions: []
+      questions: [],
+      selectedAnswers: nextProduct.selectedAnswers?.map((answer: any) => answer.answerName) || []
     },
     currentQuestionIndex: 0
   });
@@ -450,8 +578,7 @@ export async function handleIncomingTextMessage(
   res: any,
   name?: string,
   address?: Address,
-) {
-
+): Promise<void> {
   console.log('MENSAGEM RECEBIDA', message)
 
   if (message?.interactive?.type === 'nfm_reply') {
@@ -464,7 +591,6 @@ export async function handleIncomingTextMessage(
   }
 
   try {
-
     // Loja Aberta
     let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
 
@@ -661,7 +787,6 @@ export async function handleIncomingTextMessage(
 
     // verifica se e confirmacao de endereco
     if (currentConversation?.flow === 'ADDRESS_CONFIRMATION') {
-      console.log('----()---------ADDRESS CONFIRMATON', message)
 
       // Chamar OpenAI para interpretar a resposta do cliente
       const userResponse = message?.text?.body || '';
@@ -719,7 +844,7 @@ export async function handleIncomingTextMessage(
         if (currentConversation.lastMessage) {
           const extractedProducts = await extractProductsFromMessageWithAI(
             currentConversation.lastMessage,
-            filterMenuByWeekday(store.menu).map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
+            filterMenuByWeekday(store.menu)
           );
 
           if (extractedProducts?.ambiguidades?.length) {
@@ -752,7 +877,29 @@ export async function handleIncomingTextMessage(
               await updateConversation(currentConversation, { flow: 'CATEGORIES' })
             }
           } else if (extractedProducts.items && extractedProducts.items.length > 0) {
-            const itensResolvidos = extractedProducts.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
+            const itensResolvidos = extractedProducts.items.map((item: any) => {
+              const totalPrice = calculateItemPriceWithSelectedAnswers(item, filterMenuByWeekday(store.menu));
+
+              // Montar descrição dos opcionais com preços individuais
+              let opcString = '';
+
+              console.log('*****************************************************************************xxxxxx', item.selectedAnswers)
+
+              if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+                const menuItem = filterMenuByWeekday(store.menu).find((m: any) => m.menuId === item.menuId);
+                const opcionaisComPreco: string[] = [];
+
+                item.selectedAnswers.forEach((selectedAnswer: any) => {
+                  const question = menuItem?.questions?.find((q: any) => q.questionId === selectedAnswer.questionId);
+                  const originalAnswer = question?.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+                  opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''))
+                });
+
+                opcString = ` (${opcionaisComPreco.join(', ')})`;
+              }
+
+              return `${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}`;
+            }).join('\n');
 
             await updateConversation(currentConversation, {
               flow: 'ORDER_REFINMENT_CONFIRMATION',
@@ -872,10 +1019,14 @@ export async function handleIncomingTextMessage(
 
             const extractedProducts = await extractProductsFromMessageWithAI(
               currentConversation.lastMessage,
-              filterMenuByWeekday(store.menu).map(item => ({ menuId: item.menuId, menuName: item.menuName, price: item.price }))
+              filterMenuByWeekday(store.menu)
             );
 
-            console.log('RETORNO DA EXTRACAO DA INTENCAO', extractedProducts)
+            extractedProducts.items?.map(item => {
+              item.selectedAnswers?.forEach(answer =>
+                console.log('RETORNO DA EXTRACAO DA INTENCAO', answer)
+              )
+            })
 
             if (extractedProducts?.ambiguidades?.length) {
               const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
@@ -887,7 +1038,6 @@ export async function handleIncomingTextMessage(
                   flow: 'ORDER_REFINMENT',
                   refinmentItems: extractedProducts,
                 });
-
 
                 await sendMessage({
                   messaging_product: 'whatsapp',
@@ -906,11 +1056,36 @@ export async function handleIncomingTextMessage(
                 await updateConversation(currentConversation, { flow: 'CATEGORIES' })
               }
             } else if (extractedProducts.items && extractedProducts.items.length > 0) {
-              const itensResolvidos = extractedProducts.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
+              const itensResolvidos = extractedProducts.items.map((item: any) => {
+                const totalPrice = calculateItemPriceWithSelectedAnswers(item, filterMenuByWeekday(store.menu));
+
+                // Montar descrição dos opcionais com preços individuais
+                let opcString = '';
+
+                console.log('*****************************************************************************xxxxxx', item.selectedAnswers)
+
+                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+                  const menuItem = filterMenuByWeekday(store.menu).find((m: any) => m.menuId === item.menuId);
+                  const opcionaisComPreco: string[] = [];
+
+                  item.selectedAnswers.forEach((selectedAnswer: any) => {
+                    const question = menuItem?.questions?.find((q: any) => q.questionId === selectedAnswer.questionId);
+                    const originalAnswer = question?.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+                    opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''))
+                  });
+
+                  opcString = ` (${opcionaisComPreco.join(', ')})`;
+                }
+
+                return `${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}`;
+              }).join('\n');
 
               await updateConversation(currentConversation, {
                 flow: 'ORDER_REFINMENT_CONFIRMATION',
-                refinmentItems: extractedProducts
+                refinmentItems: {
+                  items: extractedProducts.items, // Preserva selectedAnswers de todos os items
+                  ambiguidades: extractedProducts.ambiguidades || []
+                }
               });
 
               await sendMessage({
@@ -1086,28 +1261,28 @@ export async function handleIncomingTextMessage(
           // Se não é para finalizar, continua o fluxo normal para adicionar mais produtos
         }
 
-        const extractedProdutcs = await extractProductsFromMessageWithAI(message.text.body || "", filterMenuByWeekday(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }))
+        const extractedProducts = await extractProductsFromMessageWithAI(message.text.body || "", filterMenuByWeekday(store.menu))
 
-        console.log('*********** EXTRACTED PRODUCTS ***********: ', message.text.body, filterMenuByWeekday(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }), extractedProdutcs);
+        console.log('*********** EXTRACTED PRODUCTS ***********: ', message.text.body, filterMenuByWeekday(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price } }), extractedProducts);
 
-        if (extractedProdutcs?.ambiguidades?.length) {
+        if (extractedProducts?.ambiguidades?.length) {
 
-          const itensAmbiguos = extractedProdutcs.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
+          const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
 
 
           if (itensAmbiguos?.length > 1) {
-            extractedProdutcs.ambiguidades[0].refining = true;
+            extractedProducts.ambiguidades[0].refining = true;
 
             await updateConversation(currentConversation, {
               flow: `ORDER_REFINMENT`,
-              refinmentItems: extractedProdutcs,
+              refinmentItems: extractedProducts,
             });
 
             await sendMessage({
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `Você pediu ${extractedProdutcs.ambiguidades[0].quantity} ${extractedProdutcs.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+              text: { body: `Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
             }, store.wabaEnvironments);
           } else {
             await sendMessage({
@@ -1120,13 +1295,35 @@ export async function handleIncomingTextMessage(
             await updateConversation(currentConversation, { flow: 'CATEGORIES' })
           }
 
-        } else if (extractedProdutcs.items && extractedProdutcs.items.length > 0) {
+        } else if (extractedProducts.items && extractedProducts.items.length > 0) {
           // Itens resolvidos diretamente, vamos confirmar com o cliente
-          const itensResolvidos = extractedProdutcs.items.map((item: any) => `${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}`).join('\n');
+          const itensResolvidos = extractedProducts.items.map((item: any) => {
+            const totalPrice = calculateItemPriceWithSelectedAnswers(item, filterMenuByWeekday(store.menu));
+
+            // Montar descrição dos opcionais com preços individuais
+            let opcString = '';
+
+            console.log('*****************************************************************************xxxxxx', item.selectedAnswers)
+
+            if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+              const menuItem = filterMenuByWeekday(store.menu).find((m: any) => m.menuId === item.menuId);
+              const opcionaisComPreco: string[] = [];
+
+              item.selectedAnswers.forEach((selectedAnswer: any) => {
+                const question = menuItem?.questions?.find((q: any) => q.questionId === selectedAnswer.questionId);
+                const originalAnswer = question?.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+                opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''))
+              });
+
+              opcString = ` (${opcionaisComPreco.join(', ')})`;
+            }
+
+            return `${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}`;
+          }).join('\n');
 
           await updateConversation(currentConversation, {
             flow: `ORDER_REFINMENT_CONFIRMATION`,
-            refinmentItems: extractedProdutcs
+            refinmentItems: extractedProducts
           });
 
           await sendMessage({
@@ -1258,7 +1455,7 @@ export async function handleIncomingTextMessage(
         // Verificar se cliente confirmou, rejeitou ou fez novo pedido
         const confirmationResult = await interpretOrderConfirmation(message?.text?.body || '');
 
-        if (confirmationResult.type === 'CONFIRMED') {
+        if (confirmationResult.type === 'CONFIRMED' || confirmationResult.type === 'CONFIRMED_WITH_ADDITION') {
           // Cliente confirmou - criar fila de produtos para processar
           const cartItems = currentConversation.cartItems || [];
 
@@ -1281,6 +1478,26 @@ export async function handleIncomingTextMessage(
 
           // Processar o primeiro produto da fila
           await processNextProductInQueue(currentConversation, store, from);
+          
+          // Se cliente confirmou e fez pedido adicional, processar também
+          if (confirmationResult.type === 'CONFIRMED_WITH_ADDITION' && confirmationResult.newOrderText) {
+            // Extrair produtos da mensagem adicional
+            const additionalProducts = await extractProductsFromMessageWithAI(
+              confirmationResult.newOrderText,
+              filterMenuByWeekday(store.menu)
+            );
+            
+            if (additionalProducts.items && additionalProducts.items.length > 0) {
+              // Adicionar produtos adicionais à fila existente
+              const updatedConversation = await getRecentConversation(from, store._id);
+              const currentQueue = updatedConversation?.pendingProductsQueue || [];
+              const newQueue = [...currentQueue, ...additionalProducts.items];
+              
+              await updateConversation(updatedConversation!, {
+                pendingProductsQueue: newQueue
+              });
+            }
+          }
         } else {
           // Cliente não confirmou - verificar se há mais ambiguidades pendentes
           const remainingAmbiguidades = currentConversation.refinmentItems?.ambiguidades?.filter(amb => !amb.refining) || [];
@@ -1330,7 +1547,7 @@ export async function handleIncomingTextMessage(
 
           console.log('CONFIRMATIONREUSLT ', confirmationResult);
 
-          if (confirmationResult.type === 'CONFIRMED') {
+          if (confirmationResult.type === 'CONFIRMED' || confirmationResult.type === 'CONFIRMED_WITH_ADDITION') {
             // Cliente confirmou a resposta, prosseguir para próxima pergunta ou finalizar
             const product = currentConversation.product!;
             const pendingAnswers = currentConversation.pendingAnswerConfirmation.selectedAnswers ||
