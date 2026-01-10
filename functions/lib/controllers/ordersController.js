@@ -124,6 +124,17 @@ const createOrder = async (conversation, paymentId, storeId) => {
         // } else {
         //   console.log(`❌ NOT SCHEDULING ALERTS - store: ${!!store}, createdAt: ${!!order.createdAt}`);
         // }
+        // Atualizar endereço do usuário com o endereço da ordem criada
+        if (order.address && conversation.phoneNumber) {
+            try {
+                await (0, userController_1.updateUserAddress)(conversation.phoneNumber, order.address);
+                console.log('✅ Endereço do usuário atualizado após criação da ordem:', order.address.name);
+            }
+            catch (error) {
+                console.error('❌ Erro ao atualizar endereço do usuário:', error);
+                // Não falha a criação da ordem se não conseguir atualizar o endereço
+            }
+        }
         return { ...order, _id: orderId };
     }
     catch (error) {

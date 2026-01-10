@@ -3,6 +3,7 @@ import { AxiosHeaders } from 'axios';
 import { Client } from '@googlemaps/google-maps-services-js';
 import { getStore } from '../controllers/storeController';
 import { Store, WABAEnvironments } from '../types/Store';
+import { sendMessageWithAudio } from './textToSpeechService';
 
 const client = new Client({});
 
@@ -31,7 +32,33 @@ export const sendMessage = async (data: Record<string, any>, wabaEnvironments: W
     console.log('ERROR sendMessage', e)
     return null;
   }
+};
 
+/**
+ * Envia mensagem de texto com opção de áudio para acessibilidade
+ * @param data Dados da mensagem (deve conter type: 'text' e text.body)
+ * @param wabaEnvironments Configurações do WABA 
+ * @param includeAudio Se deve incluir versão em áudio (padrão: false para não sobrecarregar)
+ */
+export const sendMessageWithOptionalAudio = async (
+  data: Record<string, any>, 
+  wabaEnvironments: WABAEnvironments,
+  includeAudio: boolean = false
+): Promise<any> => {
+  // Se for mensagem de texto e áudio foi solicitado, usar função especial
+  if (data.type === 'text' && includeAudio && data.text?.body) {
+    try {
+      await sendMessageWithAudio(data.to, data.text.body, wabaEnvironments, true);
+      return { success: true, withAudio: true };
+    } catch (error) {
+      console.error('Erro ao enviar com áudio, fallback para texto:', error);
+      // Fallback para mensagem normal se áudio falhar
+      return await sendMessage(data, wabaEnvironments);
+    }
+  }
+  
+  // Para outros tipos de mensagem ou quando áudio não é solicitado
+  return await sendMessage(data, wabaEnvironments);
 };
 
 export const sendWelcomeMessage = async (

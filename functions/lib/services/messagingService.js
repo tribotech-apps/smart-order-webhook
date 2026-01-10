@@ -3,13 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.notifyAdmin = exports.sendContactMessage = exports.sendDeliveredMessage = exports.sendDeliveryMessage = exports.sendConfirmationMessage = exports.sendWelcomeMessage = exports.sendMessage = void 0;
+exports.notifyAdmin = exports.sendContactMessage = exports.sendDeliveredMessage = exports.sendDeliveryMessage = exports.sendConfirmationMessage = exports.sendWelcomeMessage = exports.sendMessageWithOptionalAudio = exports.sendMessage = void 0;
 exports.delay = delay;
 exports.sendWaitingMessage = sendWaitingMessage;
 const axios_1 = __importDefault(require("axios"));
 const axios_2 = require("axios");
 const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js");
 const storeController_1 = require("../controllers/storeController");
+const textToSpeechService_1 = require("./textToSpeechService");
 const client = new google_maps_services_js_1.Client({});
 const ADMIN_PHONE_NUMBER = process.env.ADMIN_PHONE_NUMBER || '+5511910970283'; // Substitua pelo número do administrador
 function delay(ms) {
@@ -34,6 +35,29 @@ const sendMessage = async (data, wabaEnvironments) => {
     }
 };
 exports.sendMessage = sendMessage;
+/**
+ * Envia mensagem de texto com opção de áudio para acessibilidade
+ * @param data Dados da mensagem (deve conter type: 'text' e text.body)
+ * @param wabaEnvironments Configurações do WABA
+ * @param includeAudio Se deve incluir versão em áudio (padrão: false para não sobrecarregar)
+ */
+const sendMessageWithOptionalAudio = async (data, wabaEnvironments, includeAudio = false) => {
+    // Se for mensagem de texto e áudio foi solicitado, usar função especial
+    if (data.type === 'text' && includeAudio && data.text?.body) {
+        try {
+            await (0, textToSpeechService_1.sendMessageWithAudio)(data.to, data.text.body, wabaEnvironments, true);
+            return { success: true, withAudio: true };
+        }
+        catch (error) {
+            console.error('Erro ao enviar com áudio, fallback para texto:', error);
+            // Fallback para mensagem normal se áudio falhar
+            return await (0, exports.sendMessage)(data, wabaEnvironments);
+        }
+    }
+    // Para outros tipos de mensagem ou quando áudio não é solicitado
+    return await (0, exports.sendMessage)(data, wabaEnvironments);
+};
+exports.sendMessageWithOptionalAudio = sendMessageWithOptionalAudio;
 const sendWelcomeMessage = async (phoneNumber, flowToken, wabaEnvironments, store, imageUrl) => {
     try {
         await (0, exports.sendMessage)({

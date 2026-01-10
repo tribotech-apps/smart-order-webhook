@@ -11,3 +11,10 @@ export interface WhatsAppImageMessage {
   type: 'image';
   image: { id: string; caption?: string };
 }
+
+export interface WhatsAppAudioMessage {
+  messaging_product: 'whatsapp';
+  to: string;
+  type: 'audio';
+  audio: { id: string };
+}

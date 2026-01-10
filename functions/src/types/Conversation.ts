@@ -92,6 +92,7 @@ export interface Conversation {
   pendingProductsQueue?: ResolvedItem[]; // fila de produtos que ainda precisam ter perguntas respondidas
   currentProcessingProduct?: ResolvedItem | null; // produto atualmente sendo processado
   returnToPayment?: boolean;
+  pendingAddress?: string; // endereço pendente de confirmação
 }
 
 export interface ResolvedItem {

@@ -98,9 +98,9 @@ Regras de classificação (priorize na ordem):
 
 - "greeting": apenas saudação (oi, olá, bom dia, boa tarde, tudo bem, e aí) sem menção a pedido/comida.
 
-- "want_menu_or_start": quer ver cardápio, catálogo, menu OU quer fazer pedido mas não menciona produto específico ("quero pedir", "pode mandar o cardápio?", "faz um pedido").
+- "want_menu_or_start": quer ver cardápio, catálogo, menu SEM mencionar produto específico ("quero pedir", "pode mandar o cardápio?", "faz um pedido", "quero fazer pedido", "me manda o menu").
 
-- "ordering_products": menciona produtos específicos ou adicionais ("uma marmitex", "2 cocas", "um sorvete de chocolate").
+- "ordering_products": menciona produtos específicos MESMO que seja genérico ("uma marmitex", "marmita", "2 cocas", "um sorvete", "pode mandar uma pizza", "quero um hambúrguer", "manda um marmitex"). SEMPRE que mencionar nome de produto = ordering_products.
 
 - "close_order": quer finalizar ("só isso", "é só", "pode fechar", "finaliza", "ta bom assim", "nada mais", "quero pagar").
 
@@ -113,6 +113,19 @@ Regras de classificação (priorize na ordem):
 - "other": qualquer outra coisa.
 
 Pedido atual (para contexto): {currentOrder}
+
+EXEMPLOS CRÍTICOS DE CLASSIFICAÇÃO:
+
+Cliente: "pode mandar uma marmita" → {"intent": "ordering_products"} (menciona produto específico)
+Cliente: "quero um marmitex" → {"intent": "ordering_products"} (menciona produto específico)
+Cliente: "manda uma coca" → {"intent": "ordering_products"} (menciona produto específico)
+Cliente: "tem pizza?" → {"intent": "ordering_products"} (pergunta sobre produto específico)
+
+Cliente: "quero pedir" → {"intent": "want_menu_or_start"} (não menciona produto)
+Cliente: "pode mandar o cardápio?" → {"intent": "want_menu_or_start"} (pede cardápio)
+Cliente: "quero fazer um pedido" → {"intent": "want_menu_or_start"} (não especifica produto)
+
+REGRA PRINCIPAL: Se a mensagem contém QUALQUER nome de comida/bebida (marmita, pizza, coca, hambúrguer, etc.) = ordering_products
 
 EXEMPLOS PARA REMOVE_PRODUCT:
 
@@ -142,17 +155,53 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Função de fallback para matching simples quando OpenAI falha
 function tryFallbackMatching(message: string, options: MenuOption[], minRequired: number): MultipleSelectionResult | null {
-  const normalizedMessage = message.toLowerCase().trim();
+  const normalizedMessage = message
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .trim();
 
   // Palavras-chave para matching
   const matches: { option: MenuOption; confidence: number }[] = [];
 
+  // REGRA CRÍTICA: Matching parcial de palavra-chave única
+  // Se apenas 1 opção contém a palavra do cliente, selecione automaticamente
+  const messageWords = normalizedMessage.split(/\s+/).filter(w => w.length >= 3);
+
+  for (const msgWord of messageWords) {
+    const optionsWithWord = options.filter(opt => {
+      const normalizedOption = opt.menuName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return normalizedOption.includes(msgWord);
+    });
+
+    // Se APENAS 1 opção contém essa palavra → match direto
+    if (optionsWithWord.length === 1) {
+      console.log(`✅ Fallback: encontrou match único para "${msgWord}" → ${optionsWithWord[0].menuName}`);
+      return {
+        answers: [{
+          answerId: optionsWithWord[0].menuId,
+          answerName: optionsWithWord[0].menuName,
+          quantity: 1,
+          price: optionsWithWord[0].price
+        }],
+        totalSelected: 1,
+        isValid: 1 >= minRequired
+      };
+    }
+  }
+
+  // Fallback original: matching por confiança
   options.forEach(option => {
-    const normalizedOption = option.menuName.toLowerCase();
+    const normalizedOption = option.menuName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
     let confidence = 0;
 
     // Verificar se a mensagem contém palavras-chave da opção
-    const messageWords = normalizedMessage.split(/\s+/);
     const optionWords = normalizedOption.split(/\s+/);
 
     messageWords.forEach(msgWord => {
@@ -332,9 +381,34 @@ REGRAS IMPORTANTES:
 1. Cliente pode escolher múltiplas opções diferentes (ex: "filé de frango e bife")
 2. Cliente pode escolher a mesma opção múltiplas vezes (ex: "2 filé de frango", "dois bife")
 3. Se não mencionar quantidade, assumir 1
-4. Seja flexível com variações linguísticas e sinônimos
+4. Seja MUITO flexível com variações linguísticas e sinônimos
 5. Mínimo necessário: ${minRequired} escolhas no total
 6. Total de quantidades deve somar pelo menos ${minRequired}
+
+MATCHING PARCIAL DE PALAVRAS-CHAVE (REGRA CRÍTICA - MÁXIMA PRIORIDADE):
+- SEMPRE procure por PALAVRAS-CHAVE PARCIAIS da resposta do cliente nos nomes das opções
+- Se APENAS 1 opção contém a palavra-chave → SEMPRE SELECIONE ESSA OPÇÃO AUTOMATICAMENTE
+- Ignore acentos, maiúsculas/minúsculas, e palavras extras na comparação
+- Matching parcial é PRIORITÁRIO sobre matching exato
+
+EXEMPLOS OBRIGATÓRIOS DE MATCHING PARCIAL:
+1. Cliente: "bife" + Opções: ["Filé de Frango", "Bife Acebolado", "Parmegiana"]
+   → Apenas 1 opção contém "bife" → SELECIONE "Bife Acebolado" automaticamente
+
+2. Cliente: "frango" + Opções: ["Filé de Frango", "Bife Acebolado"]
+   → Apenas 1 opção contém "frango" → SELECIONE "Filé de Frango" automaticamente
+
+3. Cliente: "parmegiana" + Opções: ["Filé de Frango", "Parmegiana Acebolada", "Bife"]
+   → Apenas 1 opção contém "parmegiana" → SELECIONE "Parmegiana Acebolada" automaticamente
+
+4. Cliente: "frango" + Opções: ["Filé de Frango", "Frango Grelhado", "Bife"]
+   → 2 opções contêm "frango" → NÃO selecione automaticamente (ambíguo)
+
+ALGORITMO DE MATCHING:
+1. Normalize a palavra do cliente (remova acentos, lowercase)
+2. Para cada opção, normalize o nome e verifique se CONTÉM a palavra do cliente
+3. Se EXATAMENTE 1 opção contém → SELECIONE
+4. Se 0 ou 2+ opções contêm → retorne vazio ou pergunte
 
 OPÇÕES DISPONÍVEIS:
 ${JSON.stringify(options, null, 2)}
@@ -357,7 +431,15 @@ EXEMPLOS:
 Cliente: "filé de frango e bife" (minRequired=2)
 → {"answers": [{"answerId": 1, "answerName": "Filé de Frango", "quantity": 1}, {"answerId": 2, "answerName": "Bife", "quantity": 1}], "totalSelected": 2, "isValid": true}
 
-Cliente: "2 filé de frango" (minRequired=2)  
+Cliente: "bife" com opções [Filé de Frango, Bife Acebolado, Parmegiana] (minRequired=1)
+→ {"answers": [{"answerId": 2, "answerName": "Bife Acebolado", "quantity": 1}], "totalSelected": 1, "isValid": true}
+MOTIVO: "bife" aparece APENAS em "Bife Acebolado"
+
+Cliente: "frango" com opções [Filé de Frango, Bife Acebolado] (minRequired=1)
+→ {"answers": [{"answerId": 1, "answerName": "Filé de Frango", "quantity": 1}], "totalSelected": 1, "isValid": true}
+MOTIVO: "frango" aparece APENAS em "Filé de Frango"
+
+Cliente: "2 filé de frango" (minRequired=2)
 → {"answers": [{"answerId": 1, "answerName": "Filé de Frango", "quantity": 2}], "totalSelected": 2, "isValid": true}
 
 Cliente: "lata" com opções [Coca Cola Lata, Coca Cola 2L] (minRequired=1)
@@ -488,6 +570,11 @@ Cliente: "pode adicionar" → {"type": "CONFIRMED", "response": "confirmado", "n
 
 Cliente: "sim, e quero mais uma coca" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "quero mais uma coca"}
 Cliente: "ok, e adiciona uma pizza" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "adiciona uma pizza"}
+Cliente: "sim, e manda mais uma coca lata por favor" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "manda mais uma coca lata por favor"}
+Cliente: "sim, e quero mais dois guaranás e um sorvete de chocolate" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "quero mais dois guaranás e um sorvete de chocolate"}
+Cliente: "sim e manda um marmitex pequeno com filé de frango também" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "manda um marmitex pequeno com filé de frango também"}
+Cliente: "pode adicionar e também quero uma coca cola lata" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "também quero uma coca cola lata"}
+Cliente: "correto, e coloca mais uma pizza margherita" → {"type": "CONFIRMED_WITH_ADDITION", "response": "confirmou e quer adicionar mais", "newOrderText": "coloca mais uma pizza margherita"}
 
 Cliente: "não" → {"type": "REJECTED", "response": "rejeitado", "newOrderText": null}
 Cliente: "não quero" → {"type": "REJECTED", "response": "rejeitado", "newOrderText": null}
@@ -496,7 +583,15 @@ Cliente: "não, quero o médio" → {"type": "NEW_ORDER", "response": "rejeitou 
 Cliente: "não quero pequeno, quero marmitex médio e duas cocas" → {"type": "NEW_ORDER", "response": "rejeitou e fez novo pedido", "newOrderText": "quero marmitex médio e duas cocas"}
 Cliente: "na verdade quero uma pizza" → {"type": "NEW_ORDER", "response": "rejeitou e fez novo pedido", "newOrderText": "quero uma pizza"}
 
-REGRA IMPORTANTE: Se a mensagem contém palavras de confirmação (sim, ok, correto, pode, etc.) no INÍCIO, sempre considere como confirmação, mesmo se houver conteúdo adicional.
+REGRAS IMPORTANTES:
+1. Se a mensagem contém palavras de confirmação (sim, ok, correto, pode, etc.) no INÍCIO, sempre considere como confirmação, mesmo se houver conteúdo adicional.
+2. Para CONFIRMED_WITH_ADDITION, extraia EXATAMENTE a parte da mensagem que representa o pedido adicional:
+   - "sim, e manda mais uma coca lata" → newOrderText: "manda mais uma coca lata"
+   - "ok, e quero dois guaranás" → newOrderText: "quero dois guaranás"
+   - "pode adicionar e também um marmitex pequeno com frango" → newOrderText: "também um marmitex pequeno com frango"
+3. Detecte palavras conectoras: "e", "também", "mais", "ainda", "além disso", "e quero", "e manda"
+4. SEMPRE extraia quantidades específicas: "dois", "três", "uma", "2", "3", etc.
+5. SEMPRE extraia especificações: "com filé de frango", "de chocolate", "lata", "pequeno", etc.
 
 Retorne APENAS o JSON, sem texto adicional.`;
 
@@ -554,13 +649,18 @@ ALGORITMO:
 2. Para cada produto: busque nome similar no cardápio (ignore acentos/case)
    IMPORTANTE: "sorvete de chocolate" deve buscar por "sorvete" no cardápio
 3. Decisão: 0 match = ignore | 1 match = item direto | 2+ matches = ambiguidade
-4. Para items diretos com questions/answers: REGRAS CRÍTICAS PARA MÚLTIPLOS PRODUTOS
-   - QUANDO há MÚLTIPLOS produtos na mensagem: seja EXTRA conservador
-   - SE qualquer produto tem perguntas obrigatórias não especificamente mencionadas → AMBIGUIDADES
-   - "marmitex médio e sorvete" → "marmitex médio" precisa de carne = AMBIGUIDADE
-   - "marmitex médio com frango e sorvete" → carne especificada = pode ser item direto
-   - Para múltiplos produtos, NÃO assuma respostas - cliente deve ser específico
-   - NUNCA invente respostas quando há múltiplos produtos na mensagem
+4. Para items diretos com questions/answers: REGRAS PARA EXTRAÇÃO DE RESPOSTAS
+   - SEMPRE extraia respostas que o cliente mencionou EXPLICITAMENTE
+   - "marmitex médio com parmegiana e bife acebolado" → extrair "parmegiana" e "bife acebolado" como selectedAnswers
+   - "sorvete de morango" → extrair "morango" como selectedAnswer
+   - REGRA CRÍTICA: Se o cliente mencionou EXPLICITAMENTE alguma opção, SEMPRE extraia como selectedAnswer
+   - Exemplo: "eu pedi um marmitex medio com parmegiana e bife acebolado e um sorvete de morango"
+     → extrair "parmegiana", "bife acebolado" como selectedAnswers do marmitex
+     → extrair "morango" como selectedAnswer do sorvete
+   - Se o cliente especificou TODAS as respostas obrigatórias → item direto
+   - Se o cliente especificou ALGUMAS mas não todas as obrigatórias → ambiguidade
+   - "marmitex médio" sem especificar carne (obrigatória) → AMBIGUIDADE
+   - "marmitex médio com frango" especificando carne obrigatória → item direto
 
 EXEMPLOS CORRETOS:
 
@@ -572,13 +672,22 @@ PRODUTO ÚNICO (mais permissivo):
 "sorvete de chocolate" com produto que tem pergunta opcional de sabor
 → items: [{"menuName": "Sorvete", "quantity": 1, "selectedAnswers": [{"questionId": [ID_REAL], "answerId": [ID_REAL], "answerName": "Chocolate"}]}]
 
-MÚLTIPLOS PRODUTOS (extra conservador):
+MÚLTIPLOS PRODUTOS (inteligente):
 "marmitex médio e sorvete de chocolate" = 2 produtos com perguntas
-→ items: [] (NÃO adicione nada direto)
-→ ambiguidades: [
-    {"palavra": "marmitex médio", "quantity": 1, "items": [produto1]},
-    {"palavra": "sorvete de chocolate", "quantity": 1, "items": [produto2]}
-] (cliente deve escolher especificações para cada produto separadamente)
+→ ANALISE CADA PRODUTO:
+   - "sorvete de chocolate": cliente especificou "chocolate" → extrair como selectedAnswer
+   - "marmitex médio": cliente NÃO especificou carne obrigatória → vai para ambiguidades
+→ items: [{"menuName": "Sorvete", "selectedAnswers": [{"questionId": X, "answerId": Y, "answerName": "Chocolate"}]}]
+→ ambiguidades: [{"palavra": "marmitex médio", "quantity": 1, "items": [produto_marmitex]}]
+
+"marmitex médio com parmegiana e bife acebolado e sorvete de morango"
+→ ANALISE CADA PRODUTO:
+   - "marmitex médio": cliente especificou "parmegiana" e "bife acebolado" → extrair como selectedAnswers
+   - "sorvete": cliente especificou "morango" → extrair como selectedAnswer
+→ items: [
+    {"menuName": "Marmitex Médio", "selectedAnswers": [{"answerId": X, "answerName": "Parmegiana"}, {"answerId": Y, "answerName": "Bife Acebolado"}]},
+    {"menuName": "Sorvete", "selectedAnswers": [{"answerId": Z, "answerName": "Morango"}]}
+]
 
 "2 guaranás e coca" = produtos SEM perguntas
 → items: [{"menuName": "Guaraná Lata", "quantity": 2}, {"menuName": "Coca Lata", "quantity": 1}]
@@ -586,6 +695,14 @@ MÚLTIPLOS PRODUTOS (extra conservador):
 
 "marmitex médio com frango e sorvete de chocolate" = especificação clara
 → items: [{"menuName": "Marmitex Médio", "selectedAnswers": [frango]}, {"menuName": "Sorvete", "selectedAnswers": [chocolate]}]
+
+EXEMPLO ESPECÍFICO DO USUÁRIO:
+"eu pedi um marmitex medio com parmegiana e bife acebolado e um sorvete de morango"
+→ SEMPRE EXTRAIR AS OPÇÕES EXPLÍCITAS: "parmegiana", "bife acebolado", "morango"
+→ items: [
+    {"menuName": "Marmitex Médio", "selectedAnswers": [{"answerName": "Parmegiana"}, {"answerName": "Bife Acebolado"}]},
+    {"menuName": "Sorvete", "selectedAnswers": [{"answerName": "Morango"}]}
+]
 
 REGRA CRÍTICA: Se um produto tem perguntas obrigatórias (minAnswerRequired > 0) não respondidas pelo cliente, SEMPRE coloque em ambiguidades para o cliente escolher depois.
 
@@ -669,9 +786,9 @@ TAREFA DUPLA:
 2. Detectar se ele quer ALTERAR O PEDIDO ao invés de escolher pagamento
 
 OPÇÕES DE PAGAMENTO DISPONÍVEIS:
-1. PIX - Pagamento via PIX
-2. CARTÃO DE CRÉDITO - Pagamento com cartão na entrega  
-3. PAGAMENTO NA ENTREGA - Dinheiro na entrega
+- PIX - Pagamento via PIX
+- CARTÃO DE CRÉDITO - Pagamento com cartão na entrega  
+- PAGAMENTO NA ENTREGA - Dinheiro na entrega
 
 RESPONDA EM JSON:
 {
@@ -757,38 +874,106 @@ Retorne APENAS o JSON, sem texto adicional.`;
 }
 
 /**
- * Identifica tipo de entrega escolhido pelo cliente usando IA
+ * Identifica tipo de entrega: se cliente informou ENDEREÇO (delivery) ou disse RETIRADA (counter)
+ * Nova pergunta: "Informe seu endereço para entrega ou digite Retirada para retirar o pedido na loja"
  */
-export async function identifyDeliveryType(userResponse: string): Promise<{ type: 'delivery' | 'counter' | null; confidence: number }> {
-  const systemPrompt = `Você é um assistente especializado em identificar tipo de entrega escolhido por clientes.
+export async function identifyDeliveryType(userResponse: string): Promise<{ 
+  type: 'delivery' | 'counter' | null; 
+  confidence: number; 
+  extractedAddress?: string;
+  parsedAddress?: {
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    complement?: string;
+  };
+}> {
+  const systemPrompt = `Você é um assistente especializado em identificar se o cliente informou um ENDEREÇO ou quer RETIRADA.
 
-TAREFA: Analisar a resposta do cliente e identificar se ele quer entrega ou retirada.
+CONTEXTO: Cliente foi perguntado: "Informe seu endereço para entrega ou digite Retirada para retirar o pedido na loja"
 
-OPÇÕES DISPONÍVEIS:
-1. ENTREGA - Cliente quer receber em casa/endereço
-2. RETIRADA - Cliente vai buscar na loja/balcão
+TAREFA: Analisar se a resposta contém um endereço OU indica retirada na loja.
 
 RESPONDA EM JSON:
 {
   "type": "delivery" | "counter" | null,
   "confidence": number (0-100),
-  "reasoning": "string explicando a decisão"
+  "reasoning": "string explicando a decisão",
+  "extractedAddress": "string" (OBRIGATÓRIO se type=delivery - endereço completo extraído),
+  "parsedAddress": {
+    "street": "string" (nome da rua/avenida),
+    "number": "string" (número),
+    "neighborhood": "string" (bairro, se mencionado),
+    "complement": "string" (apartamento, casa, etc.)
+  }
 }
 
-REGRAS:
-- Se mencionar "entrega", "entregar", "casa", "endereço", "delivery" → delivery
-- Se mencionar "retirada", "buscar", "loja", "balcão", "pickup", "retirar" → counter
-- Se mencionar "1", "primeira opção" → delivery (assumindo ordem padrão)
-- Se mencionar "2", "segunda opção" → counter (assumindo ordem padrão)
-- Se não conseguir identificar claramente → null
-- Confidence: 90-100 (muito claro), 70-89 (claro), 50-69 (provável), <50 (incerto)
+REGRAS PARA IDENTIFICAÇÃO:
+
+1. **DELIVERY** - Cliente informou um ENDEREÇO:
+   - Contém rua + número ("rua das flores 123", "av paulista 1000")
+   - Padrões de endereço ("na rua...", "aqui na...", "r. antonio...")
+   - Bairros conhecidos ("vila madalena", "centro", "jardim...")
+   - CEPs ("01234-567", "12345678")
+   - Qualquer indicação clara de localização física
+
+2. **COUNTER** - Cliente quer RETIRADA:
+   - Palavras: "retirada", "retirar", "buscar", "loja", "balcão", "pickup"
+   - Frases: "vou buscar", "retirar na loja", "buscar no balcão"
+   - Variações: "retiro", "pego lá", "vou pegar"
+
+3. **NULL** - Não conseguiu identificar claramente
 
 EXEMPLOS:
-Cliente: "entrega" → {"type": "delivery", "confidence": 95, "reasoning": "menciona entrega diretamente"}
-Cliente: "quero receber em casa" → {"type": "delivery", "confidence": 90, "reasoning": "quer receber em casa"}
-Cliente: "vou buscar" → {"type": "counter", "confidence": 85, "reasoning": "indica que vai buscar"}
-Cliente: "retirada na loja" → {"type": "counter", "confidence": 95, "reasoning": "especifica retirada na loja"}
-Cliente: "tanto faz" → {"type": null, "confidence": 10, "reasoning": "resposta ambígua"}
+
+Cliente: "rua das flores, 123" → {
+  "type": "delivery", 
+  "confidence": 95, 
+  "reasoning": "informou endereço completo",
+  "extractedAddress": "rua das flores, 123",
+  "parsedAddress": {
+    "street": "rua das flores",
+    "number": "123",
+    "neighborhood": "",
+    "complement": ""
+  }
+}
+
+Cliente: "av paulista 1000 ap 50" → {
+  "type": "delivery", 
+  "confidence": 95, 
+  "reasoning": "endereço com complemento",
+  "extractedAddress": "av paulista 1000 ap 50",
+  "parsedAddress": {
+    "street": "av paulista",
+    "number": "1000",
+    "neighborhood": "",
+    "complement": "ap 50"
+  }
+}
+
+Cliente: "vila madalena, r. harmonia 789" → {
+  "type": "delivery", 
+  "confidence": 95, 
+  "reasoning": "bairro e rua especificados",
+  "extractedAddress": "vila madalena, r. harmonia 789",
+  "parsedAddress": {
+    "street": "r. harmonia",
+    "number": "789",
+    "neighborhood": "vila madalena",
+    "complement": ""
+  }
+}
+
+Cliente: "retirada" → {"type": "counter", "confidence": 95, "reasoning": "escolheu retirada explicitamente"}
+Cliente: "vou buscar na loja" → {"type": "counter", "confidence": 90, "reasoning": "indica que vai buscar"}
+Cliente: "retirar" → {"type": "counter", "confidence": 85, "reasoning": "variação de retirada"}
+Cliente: "pego lá" → {"type": "counter", "confidence": 75, "reasoning": "indica retirada informal"}
+
+Cliente: "sim" → {"type": null, "confidence": 20, "reasoning": "resposta ambígua"}
+Cliente: "ok" → {"type": null, "confidence": 15, "reasoning": "confirmação sem especificação"}
+
+IMPORTANTE: Priorize detecção de ENDEREÇOS (delivery) sobre palavras soltas. Se há indícios de localização física = delivery.
 
 Retorne APENAS o JSON, sem texto adicional.`;
 
@@ -810,11 +995,152 @@ Retorne APENAS o JSON, sem texto adicional.`;
 
     return {
       type: parsed.type || null,
-      confidence: parsed.confidence || 0
+      confidence: parsed.confidence || 0,
+      extractedAddress: parsed.extractedAddress,
+      parsedAddress: parsed.parsedAddress
     };
 
   } catch (error) {
     console.error('Erro ao identificar tipo de entrega:', error);
     return { type: null, confidence: 0 };
+  }
+}
+
+interface AddressDetectionResult {
+  hasAddress: boolean;
+  extractedAddress?: string;
+  confidence: number;
+  parsedAddress?: {
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    complement?: string;
+  };
+}
+
+/**
+ * Detecta se a mensagem contém um endereço de entrega
+ */
+export async function detectAddressInMessage(message: string): Promise<AddressDetectionResult> {
+  const systemPrompt = `Você é um assistente especializado em detectar endereços de entrega em mensagens de pedidos de delivery.
+
+TAREFA: Analisar se a mensagem contém um endereço completo ou parcial para entrega.
+
+PADRÕES COMUNS DE ENDEREÇO:
+- "manda um [produto] na rua [nome], [número], [bairro]"
+- "aqui na rua [nome], [número]"
+- "rua [nome], [número] - [bairro]"
+- "av [nome], [número]"
+- "entregar em [endereço]"
+- "[produto] aqui na [endereço]"
+
+RESPONDA EM JSON:
+{
+  "hasAddress": boolean,
+  "extractedAddress": "string" (endereço extraído da mensagem),
+  "confidence": number (0-100),
+  "parsedAddress": {
+    "street": "string" (nome da rua/avenida),
+    "number": "string" (número),
+    "neighborhood": "string" (bairro, se mencionado),
+    "complement": "string" (apartamento, casa, etc.)
+  }
+}
+
+REGRAS:
+- hasAddress = true apenas se houver rua/av + número OU indicação clara de local
+- extractedAddress deve conter o endereço completo encontrado na mensagem
+- confidence alto (80+) para endereços completos, médio (50-79) para parciais, baixo (<50) para duvidosos
+- Ignore referências genéricas como "em casa", "aqui", sem detalhes
+- Detecte variações: "rua", "r.", "av", "avenida", "travessa", "alameda"
+
+EXEMPLOS:
+
+"manda um filé de frango na rua dos anjos, 10, vila emma" → {
+  "hasAddress": true,
+  "extractedAddress": "rua dos anjos, 10, vila emma",
+  "confidence": 95,
+  "parsedAddress": {
+    "street": "rua dos anjos",
+    "number": "10",
+    "neighborhood": "vila emma",
+    "complement": ""
+  }
+}
+
+"pode mandar um marmitex medio aqui na rua jose roberto messias, 160 - v de france 3" → {
+  "hasAddress": true,
+  "extractedAddress": "rua jose roberto messias, 160 - v de france 3",
+  "confidence": 95,
+  "parsedAddress": {
+    "street": "rua jose roberto messias",
+    "number": "160",
+    "neighborhood": "v de france 3",
+    "complement": ""
+  }
+}
+
+"quero uma pizza na rua das flores 250" → {
+  "hasAddress": true,
+  "extractedAddress": "rua das flores 250",
+  "confidence": 85,
+  "parsedAddress": {
+    "street": "rua das flores",
+    "number": "250",
+    "neighborhood": "",
+    "complement": ""
+  }
+}
+
+"entrega na av paulista 1000 ap 50" → {
+  "hasAddress": true,
+  "extractedAddress": "av paulista 1000 ap 50",
+  "confidence": 90,
+  "parsedAddress": {
+    "street": "av paulista",
+    "number": "1000",
+    "neighborhood": "",
+    "complement": "ap 50"
+  }
+}
+
+"quero um lanche" → {
+  "hasAddress": false,
+  "extractedAddress": "",
+  "confidence": 5,
+  "parsedAddress": {}
+}
+
+Retorne APENAS o JSON, sem texto adicional.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Mensagem do cliente: "${message}"` }
+      ],
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
+
+    console.log(`📍 IA detectou endereço para "${message}":`, parsed);
+
+    return {
+      hasAddress: parsed.hasAddress || false,
+      extractedAddress: parsed.extractedAddress,
+      confidence: parsed.confidence || 0,
+      parsedAddress: parsed.parsedAddress
+    };
+
+  } catch (error) {
+    console.error('Erro ao detectar endereço:', error);
+    return {
+      hasAddress: false,
+      confidence: 0
+    };
   }
 }
