@@ -7,12 +7,10 @@ import cors from 'cors';
 import {
   createConversation,
   getRecentConversation,
-  updateConversation
 } from '../../controllers/conversationController';
 import { Conversation } from '../../types/Conversation';
 require("firebase-functions/logger/compat");
 import { notifyAdmin, sendMessage } from '../../services/messagingService';
-// import { buildCartTableString, buildCartTableStringFromRichText, redirectToOrderSummary } from '../../services/shoppingService';
 import { handleIncomingTextMessage } from '../../services/incomingMessageService';
 import { withLock, generateLockKey } from '../../utils/concurrencyControl';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
@@ -20,30 +18,7 @@ import { getUserByPhone } from '../../controllers/userController';
 import { Client } from '@googlemaps/google-maps-services-js';
 import { diagnostics, DiagnosticCategory } from '../../services/diagnosticsService';
 import { getActiveOrder } from '../../controllers/ordersController';
-import { classifyCustomerIntent, extractProductsFromMessageWithAI, } from '../../services/messageHelper';
 import { processVoiceMessage, isVoiceMessage, extractAudioFromMessage } from '../../services/audioService';
-import { filterMenuByWeekday } from '../../services/orderService';
-
-const client = new SecretManagerServiceClient();
-const clientGoogle = new Client({});
-
-const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
-// Cache to store address details temporarily
-const addressCache: {
-  [key: string]: {
-    lat: number;
-    lng: number;
-    title: string;
-    description: string;
-    placeId: string;
-    street?: string; // Rua
-    number?: string; // Número
-    neighborhood?: string; // Bairro
-    city?: string; // Cidade
-    state?: string; // Estado
-    zipCode?: string; // CEP
-  };
-} = {};
 
 const router = express.Router();
 router.use(cors());
@@ -51,24 +26,6 @@ router.use(express.json()); // Middleware para processar JSON no corpo da requis
 
 // Variáveis de ambiente
 const WABA_VERIFY_TOKEN = process.env.WABA_VERIFY_TOKEN || '';
-
-// Função utilitária para converter imagem remota em base64 (opcional)
-const convertImageToBase64 = async (imageUrl?: string): Promise<string> => {
-  if (!imageUrl) return "";
-
-  console.log('Converting image to Base64:', imageUrl);
-
-  try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) throw new Error(`Erro ao buscar imagem: ${response.statusText}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return buffer.toString('base64');
-  } catch (error) {
-    console.error('Erro ao converter imagem para Base64:', error);
-    return "";
-  }
-};
 
 // Rota para validar o webhook do Facebook
 router.get('/webhook', (req, res) => {
@@ -212,7 +169,6 @@ router.post('/webhook', async (req, res) => {
               let currentConversation: Conversation | undefined = await getRecentConversation(from, store._id);
 
               if (!currentConversation) {
-
                 // Check opening hour
                 const storeStatus = getStoreStatus(store);
                 console.log('STATUS DA LOJA', storeStatus)
@@ -275,6 +231,13 @@ router.post('/webhook', async (req, res) => {
                   to: "+" + from,
                   type: 'text',
                   text: { body: `✅ Olá, tudo bem? Obrigado pela visita. Este canal é exclusivo para pedidos delivery. Um momento, por favor...` }
+                }, wabaEnv!);
+              } else {
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `✅ Um momento, por favor...` }
                 }, wabaEnv!);
               }
 

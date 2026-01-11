@@ -2,12 +2,12 @@ import { createOrder } from '../controllers/ordersController';
 import { deleteConversation, getRecentConversation, updateConversation } from '../controllers/conversationController';
 import { sendMessage, notifyAdmin } from './messagingService';
 import { Conversation } from '../types/Conversation';
-import { MenuItemAnswer, ShoppingCartItem, Store } from '../types/Store';
+import { ShoppingCartItem, Store } from '../types/Store';
 import { Address } from '../types/User';
 import { getUserByPhone, updateUserAddress } from '../controllers/userController';
 import { getStoreStatus } from '../controllers/storeController';
 import OpenAI from "openai";
-import { Client, PlaceAutocompleteType } from '@googlemaps/google-maps-services-js';
+import { Client } from '@googlemaps/google-maps-services-js';
 
 import { onInit } from 'firebase-functions/v2/core';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +15,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { classifyCustomerIntent, extractProductsFromMessageWithAI, selectMultipleOptionsByAI, interpretOrderConfirmation, identifyPaymentMethod, identifyDeliveryType, detectAddressInMessage } from './messageHelper';
 import { sendMessageWithOptionalAudio } from './messagingService';
 import { filterMenuByWeekday } from './orderService';
-import { user } from 'firebase-functions/v1/auth';
 
 // Função helper para enviar mensagem com áudio baseado em configuração do usuário
 async function sendMessageAccessible(messageData: any, wabaEnvironments: any, enableAudio: boolean = true) {
@@ -54,10 +53,6 @@ function formatBeautifulMenu(products: any[]): string {
     if (product.questions && product.questions.length > 0) {
       const optionalQuestions = product.questions.filter((q: any) => q.minAnswerRequired === 0);
       const requiredQuestions = product.questions.filter((q: any) => q.minAnswerRequired > 0);
-
-      // if (requiredQuestions.length > 0) {
-      //   beautifulMenu += `⚠️ *Inclui escolha de:* ${requiredQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
-      // }
 
       if (optionalQuestions.length > 0) {
         beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q: any) => q.questionName.toLowerCase()).join(', ')}\n`;
@@ -210,6 +205,9 @@ async function processNextProductInQueue(
     // Sem mais produtos na fila - mostrar resumo final
     const subtotal = cartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
     const isDelivery = conversation.deliveryOption === 'delivery';
+
+    console.log('<-- DELIVERY OPTION 2 -->', conversation.deliveryOption, store.deliveryPrice)
+
     const deliveryPrice = isDelivery ? (store.deliveryPrice || 0) : 0;
     const totalFinal = subtotal + deliveryPrice;
     const itemsSummary = cartItems.map((item: any) => generateItemDescription(item)).join('\n\n━━━━━━━━━━━━━━━━━━━━\n\n');
@@ -609,7 +607,6 @@ export async function handleIncomingTextMessage(
       return;
     }
 
-
     // Atualiza a Conversation com a mensagem d 
     await updateConversation(currentConversation, {
       history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} ${message?.text?.body}`
@@ -627,20 +624,12 @@ export async function handleIncomingTextMessage(
             const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
             // Enviar cardápio formatado para o cliente
             if (store.wabaEnvironments) {
-              await sendMessage({
-                messaging_product: 'whatsapp',
-                to: "+" + from,
-                type: 'text',
-                text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}` }
-              }, store.wabaEnvironments);
-
               const menuMessage = '📱 *COMO FAZER SEU PEDIDO* 📱\n\n🗣️ INFORME O PRODUTO DESEJADO\n\n🎤 *PODE MANDAR MENSAGEM DE VOZ!*\n\n📝 *EXEMPLOS:*\n"Quero uma pizza margherita"\n"1 marmitex médio"\n\n👆 *DIGITE OU FALE AGORA:*';
-
               await sendMessage({
                 messaging_product: 'whatsapp',
                 to: "+" + from,
                 type: 'text',
-                text: { body: `${menuMessage}` }
+                text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}\n\n${menuMessage}` }
               }, store.wabaEnvironments);
             }
 
@@ -692,22 +681,23 @@ export async function handleIncomingTextMessage(
 
               return;
             } else {
-              const userFrom = await getUserByPhone(from);
-              if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
 
-                await sendMessage({
-                  messaging_product: 'whatsapp',
-                  to: "+" + from,
-                  type: 'text',
-                  text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
-                }, store.wabaEnvironments);
+              // const userFrom = await getUserByPhone(from);
+              // if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
 
-                await updateConversation(currentConversation, {
-                  flow: 'ADDRESS_CONFIRMATION',
-                  pendingAddress: userFrom.address.name
-                });
-                return;
-              }
+              //   await sendMessage({
+              //     messaging_product: 'whatsapp',
+              //     to: "+" + from,
+              //     type: 'text',
+              //     text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+              //   }, store.wabaEnvironments);
+
+              //   await updateConversation(currentConversation, {
+              //     flow: 'ADDRESS_CONFIRMATION',
+              //     pendingAddress: userFrom.address.name
+              //   });
+              //   return;
+              // }
             }
 
             // Save message in conversartions
@@ -721,8 +711,8 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `🚚 *ENTREGA OU RETIRADA?* 🚚\n\n📍 Informe seu *ENDEREÇO PARA ENTREGA* ou responda *RETIRADA* para retirar seu pedido na loja` }
-            }, store.wabaEnvironments, true)
+              text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+            }, store.wabaEnvironments, true);
 
             break;
           case "close_order":
@@ -752,7 +742,7 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: '🚚 *ENTREGA OU RETIRADA?* 🚚\n\n📍 Informe seu *ENDEREÇO PARA ENTREGA* ou responda *RETIRADA* para retirar seu pedido na loja' }
+            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
           }, store.wabaEnvironments);
           return;
         }
@@ -1074,6 +1064,148 @@ export async function handleIncomingTextMessage(
 
           }
 
+        } else if (addressConfirmationResult.wantsPickup) {
+          // Cliente mudou de ideia e quer retirar na loja
+          console.log('Cliente mudou de ideia e quer retirada na loja');
+
+          await sendMessage({
+            messaging_product: 'whatsapp',
+            to: "+" + from,
+            type: 'text',
+            text: { body: '🏪 *RETIRADA NA LOJA* 🏪\n\n✅ Perfeito! Você poderá retirar seu pedido na loja.\n\n📝 Vamos continuar com seu pedido!' }
+          }, store.wabaEnvironments);
+
+          // Retirada - processar produtos da mensagem original
+          await updateConversation(currentConversation, {
+            deliveryOption: 'counter',
+            flow: 'CATEGORIES',
+            address: undefined,
+            pendingAddress: undefined // limpar o endereço pendente
+          });
+
+          if (currentConversation.lastMessage) {
+            const extractedProducts = await extractProductsFromMessageWithAI(
+              currentConversation.lastMessage,
+              filterMenuByWeekday(store.menu)
+            );
+
+            if (extractedProducts?.ambiguidades?.length) {
+              const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => {
+                let itemText = `${item.menuName}`;
+                if (item.price > 0) {
+                  itemText += ` - R$ ${item.price.toFixed(2)}`;
+                }
+
+                // Encontrar o item completo do menu para obter as perguntas
+                const fullMenuItem = store.menu.find(menuItem => menuItem.menuId === item.menuId);
+                if (fullMenuItem && fullMenuItem.questions && fullMenuItem.questions.length > 0) {
+                  const questionsText = fullMenuItem.questions.map(question => {
+                    const answersText = question.answers ? question.answers.map(answer => {
+                      let answerText = answer.answerName;
+                      if (answer.price && answer.price > 0) {
+                        answerText += ` (+R$ ${answer.price.toFixed(2)})`;
+                      }
+                      return answerText;
+                    }).join(', ') : '';
+                    return `\n  ${question.questionName}: ${answersText}`;
+                  }).join('');
+                  itemText += questionsText;
+                }
+
+                return itemText;
+              }).join('\n\n');
+
+              if (itensAmbiguos?.length > 1) {
+                extractedProducts.ambiguidades[0].refining = true;
+
+                await updateConversation(currentConversation, {
+                  flow: 'ORDER_REFINMENT',
+                  refinmentItems: extractedProducts,
+                });
+
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `🔍 *ESCOLHA SEU PRODUTO* 🔍\n\n📝 V O C Ê   P E D I U:\n*${extractedProducts.ambiguidades[0].quantity}x ${extractedProducts.ambiguidades[0].palavra.toUpperCase()}*\n\n⬇️ *OPÇÕES DISPONÍVEIS* ⬇️\n\n${itensAmbiguos}\n\n❓ *QUAL OPÇÃO VOCÊ DESEJA?*` }
+                }, store.wabaEnvironments);
+              }
+              else {
+
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `❌ *PRODUTO NÃO ENCONTRADO* ❌\n\n🔍 N Ã O   C O N S E G U I   I D E N T I F I C A R\n\n📋 *POR FAVOR:*\nInforme produtos do nosso C A R D Á P I O\n\n📱 *Digite o nome do produto que deseja*` }
+                }, store.wabaEnvironments);
+
+                await updateConversation(currentConversation, { flow: 'CATEGORIES' })
+              }
+            } else if (extractedProducts.items && extractedProducts.items.length > 0) {
+              const itensResolvidos = extractedProducts.items.map((item: any) => {
+                const totalPrice = calculateItemPriceWithSelectedAnswers(item, filterMenuByWeekday(store.menu));
+
+                // Montar descrição dos opcionais com preços individuais
+                let opcString = '';
+
+                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+                  const menuItem = filterMenuByWeekday(store.menu).find((m: any) => m.menuId === item.menuId);
+                  const opcionaisComPreco: string[] = [];
+
+                  item.selectedAnswers.forEach((selectedAnswer: any) => {
+                    const question = menuItem?.questions?.find((q: any) => q.questionId === selectedAnswer.questionId);
+                    const originalAnswer = question?.answers?.find((a: any) => a.answerId === selectedAnswer.answerId);
+                    opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''))
+                  });
+
+                  opcString = ` (${opcionaisComPreco.join(', ')})`;
+                }
+
+                return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+              }).join('\n');
+
+              await updateConversation(currentConversation, {
+                flow: 'ORDER_REFINMENT_CONFIRMATION',
+                refinmentItems: extractedProducts
+              });
+
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+              }, store.wabaEnvironments);
+            } else {
+              await sendMessage({
+                messaging_product: 'whatsapp',
+                to: "+" + from,
+                type: 'text',
+                text: { body: `✅ *Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+              }, store.wabaEnvironments);
+
+              await updateConversation(currentConversation, { flow: 'CATEGORIES' })
+            }
+          } else {
+            await updateConversation(currentConversation, { flow: 'CATEGORIES' });
+
+            // Cliente já definiu retirada - enviar cardápio
+            const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
+
+            // Atualizar histórico da conversa
+            await updateConversation(currentConversation, {
+              history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente mudou para retirada na loja, cardápio enviado`
+            });
+
+            // Enviar cardápio formatado para o cliente
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: beautifulMenu }
+            }, store.wabaEnvironments);
+
+          }
+
         } else if (addressConfirmationResult.newAddress) {
           // Cliente forneceu um novo endereço
           console.log('Cliente forneceu novo endereço:', addressConfirmationResult.newAddress);
@@ -1082,7 +1214,7 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `📍 *CONFIRMAR ENDEREÇO* 📍\n\n🏠 *ENDEREÇO*   I N F O R M A D O:\n*${addressConfirmationResult.newAddress}*\n\n❓ *ESTE ENDEREÇO ESTÁ CORRETO?*\n\n` }
+            text: { body: `📍 *CONFIRMAR ENDEREÇO* 📍\n\n🏠 *ENDEREÇO* *INFORMADO*:\n*${addressConfirmationResult.newAddress}*\n\n❓ *ESTE ENDEREÇO ESTÁ CORRETO?*\n\n` }
           }, store.wabaEnvironments);
 
           // Atualizar para fluxo de novo endereço e reprocessar
@@ -1100,7 +1232,7 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: '📍 *INFORME ENDEREÇO NOVAMENTE* 📍\n\n🏠 POR FAVOR INFORME NOVAMENTE\n\n⚠️ *IMPORTANTE:*\nNÃO precisa informar o B A I R R O\n\n📝 *EXEMPLO:*\nRua das Torres, 181, apto 10' }
+            text: { body: '📍 *INFORME ENDEREÇO NOVAMENTE* 📍\n\n🏠 POR FAVOR INFORME NOVAMENTE\n\n📝 *EXEMPLO:*\nRua das Torres, 181, apto 10' }
           }, store.wabaEnvironments);
 
           delete currentConversation.address;
@@ -1131,22 +1263,13 @@ export async function handleIncomingTextMessage(
           const beautifulMenu = formatBeautifulMenu(filterMenuByWeekday(store.menu || []));
           // Enviar cardápio formatado para o cliente
           if (store.wabaEnvironments) {
-            await sendMessage({
-              messaging_product: 'whatsapp',
-              to: "+" + from,
-              type: 'text',
-              text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}` }
-            }, store.wabaEnvironments);
-
             const menuMessage = '📱 *COMO FAZER SEU PEDIDO* 📱\n\n🗣️ INFORME O PRODUTO DESEJADO\n\n🎤 *PODE MANDAR MENSAGEM DE VOZ!*\n\n📝 *EXEMPLOS:*\n"Quero uma pizza margherita"\n"1 marmitex médio"\n\n👆 *DIGITE OU FALE AGORA:*';
-
             await sendMessage({
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `${menuMessage}` }
+              text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}\n\n${menuMessage}` }
             }, store.wabaEnvironments);
-
           }
 
           return;
@@ -1638,6 +1761,9 @@ export async function handleIncomingTextMessage(
                 // Criar resumo do carrinho e perguntar próxima ação
                 const subtotal = cartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
                 const isDelivery = currentConversation.deliveryOption === 'delivery';
+
+                console.log('<-- DELIVERY OPTION 3 -->', currentConversation.deliveryOption)
+
                 const deliveryPrice = isDelivery ? (store.deliveryPrice || 0) : 0;
                 const totalFinal = subtotal + deliveryPrice;
 
@@ -1986,6 +2112,9 @@ export async function handleIncomingTextMessage(
         const cartItems = currentConversation.cartItems || [];
         const subtotal = cartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
         const isDelivery = currentConversation.deliveryOption === 'delivery';
+
+        console.log('<-- DELIVERY OPTION 1 -->', currentConversation.deliveryOption)
+
         const deliveryPrice = isDelivery ? (store.deliveryPrice || 0) : 0;
         const totalFinal = subtotal + deliveryPrice;
 
@@ -2558,18 +2687,25 @@ O cliente foi perguntado se confirma um endereço específico. Você deve analis
 {
   "confirmed": boolean, // true se cliente confirmou (sim, correto, ok, etc.)
   "newAddress": string | null, // novo endereço se cliente forneceu um
+  "wantsPickup": boolean, // true se cliente mudou de ideia e quer retirar na loja
   "response": string // interpretação da resposta
 }
 
 EXEMPLOS:
 
-Cliente: "sim" → {"confirmed": true, "newAddress": null, "response": "confirmado"}
-Cliente: "correto" → {"confirmed": true, "newAddress": null, "response": "confirmado"}  
-Cliente: "ok" → {"confirmed": true, "newAddress": null, "response": "confirmado"}
-Cliente: "não" → {"confirmed": false, "newAddress": null, "response": "negado"}
-Cliente: "nao" → {"confirmed": false, "newAddress": null, "response": "negado"}
-Cliente: "não, é Rua José Roberto, 82" → {"confirmed": false, "newAddress": "Rua José Roberto, 82", "response": "forneceu novo endereço"}
-Cliente: "errado, meu endereço é Avenida Brasil, 123" → {"confirmed": false, "newAddress": "Avenida Brasil, 123", "response": "forneceu novo endereço"}
+Cliente: "sim" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "correto" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "ok" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "não" → {"confirmed": false, "newAddress": null, "wantsPickup": false, "response": "negado"}
+Cliente: "nao" → {"confirmed": false, "newAddress": null, "wantsPickup": false, "response": "negado"}
+Cliente: "não, é Rua José Roberto, 82" → {"confirmed": false, "newAddress": "Rua José Roberto, 82", "wantsPickup": false, "response": "forneceu novo endereço"}
+Cliente: "errado, meu endereço é Avenida Brasil, 123" → {"confirmed": false, "newAddress": "Avenida Brasil, 123", "wantsPickup": false, "response": "forneceu novo endereço"}
+Cliente: "prefiro retirar na loja" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "vou buscar aí" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "retirada" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "vou pegar na loja" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "balcão" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "pego lá" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
 
 Retorne APENAS o JSON, sem texto adicional.`
 
@@ -2591,6 +2727,7 @@ Retorne APENAS o JSON, sem texto adicional.`
     return {
       confirmed: parsed.confirmed || false,
       newAddress: parsed.newAddress || null,
+      wantsPickup: parsed.wantsPickup || false,
       response: parsed.response || 'não interpretado'
     };
   } catch (error) {
@@ -2598,6 +2735,7 @@ Retorne APENAS o JSON, sem texto adicional.`
     return {
       confirmed: false,
       newAddress: null,
+      wantsPickup: false,
       response: 'erro na interpretação'
     };
   }

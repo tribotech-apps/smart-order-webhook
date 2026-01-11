@@ -11,43 +11,17 @@ const cors_1 = __importDefault(require("cors"));
 const conversationController_1 = require("../../controllers/conversationController");
 require("firebase-functions/logger/compat");
 const messagingService_1 = require("../../services/messagingService");
-// import { buildCartTableString, buildCartTableStringFromRichText, redirectToOrderSummary } from '../../services/shoppingService';
 const incomingMessageService_1 = require("../../services/incomingMessageService");
 const concurrencyControl_1 = require("../../utils/concurrencyControl");
-const secret_manager_1 = require("@google-cloud/secret-manager");
 const userController_1 = require("../../controllers/userController");
-const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js");
 const diagnosticsService_1 = require("../../services/diagnosticsService");
 const ordersController_1 = require("../../controllers/ordersController");
 const audioService_1 = require("../../services/audioService");
-const client = new secret_manager_1.SecretManagerServiceClient();
-const clientGoogle = new google_maps_services_js_1.Client({});
-const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
-// Cache to store address details temporarily
-const addressCache = {};
 const router = express_1.default.Router();
 router.use((0, cors_1.default)());
 router.use(express_1.default.json()); // Middleware para processar JSON no corpo da requisição
 // Variáveis de ambiente
 const WABA_VERIFY_TOKEN = process.env.WABA_VERIFY_TOKEN || '';
-// Função utilitária para converter imagem remota em base64 (opcional)
-const convertImageToBase64 = async (imageUrl) => {
-    if (!imageUrl)
-        return "";
-    console.log('Converting image to Base64:', imageUrl);
-    try {
-        const response = await fetch(imageUrl);
-        if (!response.ok)
-            throw new Error(`Erro ao buscar imagem: ${response.statusText}`);
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        return buffer.toString('base64');
-    }
-    catch (error) {
-        console.error('Erro ao converter imagem para Base64:', error);
-        return "";
-    }
-};
 // Rota para validar o webhook do Facebook
 router.get('/webhook', (req, res) => {
     const startTime = Date.now();
@@ -217,6 +191,14 @@ router.post('/webhook', async (req, res) => {
                                     to: "+" + from,
                                     type: 'text',
                                     text: { body: `✅ Olá, tudo bem? Obrigado pela visita. Este canal é exclusivo para pedidos delivery. Um momento, por favor...` }
+                                }, wabaEnv);
+                            }
+                            else {
+                                await (0, messagingService_1.sendMessage)({
+                                    messaging_product: 'whatsapp',
+                                    to: "+" + from,
+                                    type: 'text',
+                                    text: { body: `✅ Um momento, por favor...` }
                                 }, wabaEnv);
                             }
                             const userFrom = await (0, userController_1.getUserByPhone)(from);
