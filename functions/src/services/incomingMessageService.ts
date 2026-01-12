@@ -689,7 +689,7 @@ export async function handleIncomingTextMessage(
                   messaging_product: 'whatsapp',
                   to: "+" + from,
                   type: 'text',
-                  text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\nSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                  text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\n* SSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
                 }, store.wabaEnvironments);
 
                 await updateConversation(currentConversation, {
@@ -1366,8 +1366,8 @@ export async function handleIncomingTextMessage(
             });
 
             const finalMessage = (currentConversation as any).returnToPayment
-              ? `✅ *ALTERAÇÕES SALVAS* ✅\n\nAgora vamos FINALIZAR seu pedido\n\n💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n👆 *ESCOLHA UMA OPÇÃO:*`
-              : `💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n👆 *ESCOLHA UMA OPÇÃO:*`;
+              ? `✅ *ALTERAÇÕES SALVAS* ✅\n\nAgora vamos FINALIZAR seu pedido\n\n💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n👆 *ESCOLHA UMA OPÇÃO:*`
+              : `💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n👆 *ESCOLHA UMA OPÇÃO:*`;
 
             await sendMessage({
               messaging_product: 'whatsapp',
@@ -2178,12 +2178,14 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `💳 *ESCOLHA O PAGAMENTO* 💳\n\n💰 POR FAVOR ESCOLHA:\n\n👆 *OPÇÕES DISPONÍVEIS:*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n📱 *DIGITE SUA ESCOLHA:*` }
+            text: { body: `💳 *ESCOLHA O PAGAMENTO* 💳\n\n💰 POR FAVOR ESCOLHA:\n\n👆 *OPÇÕES DISPONÍVEIS:*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n📱 *DIGITE SUA ESCOLHA:*` }
           }, store.wabaEnvironments);
           return;
         }
 
         const paymentMethod = paymentIdentification.method;
+
+
 
         // Criar o pedido
         console.log('VAI CRIAR A ORDER', currentConversation.docId, JSON.stringify(currentConversation.cartItems))
@@ -2684,8 +2686,8 @@ Horário de Atendimento: 08:30 às 17:00, Status da Loja: ${storeStatus}, Taxa d
 
 export async function classifyPaymentType(message: string) {
   const systemPrompt = `Voce é robo que ajuda a identificar a forma de pagamento enviada pelo cliente. 
-  As 3 formas de pagamento existentes são: PIX, Cartão de Crédito e Pagamento na Entrega.
-  Voce vai receber a forma de pagameno digitada pelo cliente e deve identificar qual forma de pagamento é entre as opçoes PIX, Cartão de Crédito e Pagamento na Entrega. 
+  As 3 formas de pagamento existentes são: PIX, Cartão de Crédito e Cartão de Débito.
+  Voce vai receber a forma de pagameno digitada pelo cliente e deve identificar qual forma de pagamento é entre as opçoes PIX, Cartão de Crédito e Cartão de Débito. 
   O cliente pode digitar errado e voce deve identificar qual a forma de pagamento o cliente quis informar e devolver essa resposta.`
 
   const response = await openAIClient.chat.completions.create({

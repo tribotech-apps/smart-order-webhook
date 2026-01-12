@@ -561,7 +561,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                     messaging_product: 'whatsapp',
                                     to: "+" + from,
                                     type: 'text',
-                                    text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\nSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                                    text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\n* SSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
                                 }, store.wabaEnvironments);
                                 await (0, conversationController_1.updateConversation)(currentConversation, {
                                     flow: 'ADDRESS_CONFIRMATION',
@@ -1120,8 +1120,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             returnToPayment: false // Limpar a flag
                         });
                         const finalMessage = currentConversation.returnToPayment
-                            ? `✅ *ALTERAÇÕES SALVAS* ✅\n\nAgora vamos FINALIZAR seu pedido\n\n💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n👆 *ESCOLHA UMA OPÇÃO:*`
-                            : `💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n👆 *ESCOLHA UMA OPÇÃO:*`;
+                            ? `✅ *ALTERAÇÕES SALVAS* ✅\n\nAgora vamos FINALIZAR seu pedido\n\n💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n👆 *ESCOLHA UMA OPÇÃO:*`
+                            : `💳 *COMO VOCÊ GOSTARIA DE PAGAR?* 💳\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n👆 *ESCOLHA UMA OPÇÃO:*`;
                         await (0, messagingService_1.sendMessage)({
                             messaging_product: 'whatsapp',
                             to: "+" + from,
@@ -1410,7 +1410,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `Entendi que não é para adicionar adicionar esse item. O que você gostaria de pedir?` }
+                            text: { body: `Entendi que não é para adicionar esse item. O que você gostaria de pedir?` }
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: 'CATEGORIES',
@@ -1776,7 +1776,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: `💳 *ESCOLHA O PAGAMENTO* 💳\n\n💰 POR FAVOR ESCOLHA:\n\n👆 *OPÇÕES DISPONÍVEIS:*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *PAGAMENTO NA ENTREGA*\n\n📱 *DIGITE SUA ESCOLHA:*` }
+                        text: { body: `💳 *ESCOLHA O PAGAMENTO* 💳\n\n💰 POR FAVOR ESCOLHA:\n\n👆 *OPÇÕES DISPONÍVEIS:*\n\n🔹 *PIX*\n🔹 *CARTÃO DE CRÉDITO*\n🔹 *CARTÃO DE DÉBITO*\n\n📱 *DIGITE SUA ESCOLHA:*` }
                     }, store.wabaEnvironments);
                     return;
                 }
@@ -2250,8 +2250,8 @@ Horário de Atendimento: 08:30 às 17:00, Status da Loja: ${storeStatus}, Taxa d
 }
 async function classifyPaymentType(message) {
     const systemPrompt = `Voce é robo que ajuda a identificar a forma de pagamento enviada pelo cliente. 
-  As 3 formas de pagamento existentes são: PIX, Cartão de Crédito e Pagamento na Entrega.
-  Voce vai receber a forma de pagameno digitada pelo cliente e deve identificar qual forma de pagamento é entre as opçoes PIX, Cartão de Crédito e Pagamento na Entrega. 
+  As 3 formas de pagamento existentes são: PIX, Cartão de Crédito e Cartão de Débito.
+  Voce vai receber a forma de pagameno digitada pelo cliente e deve identificar qual forma de pagamento é entre as opçoes PIX, Cartão de Crédito e Cartão de Débito. 
   O cliente pode digitar errado e voce deve identificar qual a forma de pagamento o cliente quis informar e devolver essa resposta.`;
     const response = await openAIClient.chat.completions.create({
         model: "gpt-4o-mini",
