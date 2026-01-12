@@ -645,7 +645,7 @@ export async function handleIncomingTextMessage(
             // Verificar se a mensagem contém um endereço de entrega
             const addressDetection = await detectAddressInMessage(message.text.body);
 
-            console.log('addressDetection', addressDetection)
+            console.log('########## addressDetection ##########', addressDetection)
 
             if (addressDetection && addressDetection.hasAddress && addressDetection.confidence > 50) {
               // Entrega - verificar endereço
@@ -666,7 +666,8 @@ export async function handleIncomingTextMessage(
 
                 await updateConversation(currentConversation, {
                   flow: 'ADDRESS_CONFIRMATION',
-                  pendingAddress: addressFound
+                  pendingAddress: addressFound,
+                  pendingAddressObj: addressDetection.parsedAddress
                 });
               } else {
                 await sendMessage({
@@ -681,23 +682,23 @@ export async function handleIncomingTextMessage(
 
               return;
             } else {
+              const userFrom = await getUserByPhone(from);
+              if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
 
-              // const userFrom = await getUserByPhone(from);
-              // if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
+                await sendMessage({
+                  messaging_product: 'whatsapp',
+                  to: "+" + from,
+                  type: 'text',
+                  text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\nSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                }, store.wabaEnvironments);
 
-              //   await sendMessage({
-              //     messaging_product: 'whatsapp',
-              //     to: "+" + from,
-              //     type: 'text',
-              //     text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
-              //   }, store.wabaEnvironments);
-
-              //   await updateConversation(currentConversation, {
-              //     flow: 'ADDRESS_CONFIRMATION',
-              //     pendingAddress: userFrom.address.name
-              //   });
-              //   return;
-              // }
+                await updateConversation(currentConversation, {
+                  flow: 'ADDRESS_CONFIRMATION',
+                  pendingAddress: userFrom.address.name,
+                  pendingAddressObj: userFrom.address
+                });
+                return;
+              }
             }
 
             // Save message in conversartions
@@ -711,7 +712,7 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+              text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
             }, store.wabaEnvironments, true);
 
             break;
@@ -742,7 +743,7 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
           }, store.wabaEnvironments);
           return;
         }
@@ -857,6 +858,8 @@ export async function handleIncomingTextMessage(
 
           const addressFound = deliveryChoice.parsedAddress?.street ? `${deliveryChoice.parsedAddress?.street} ${deliveryChoice.parsedAddress?.number ? `,${deliveryChoice.parsedAddress?.number}` : ''} ${deliveryChoice.parsedAddress?.neighborhood ? ` - ${deliveryChoice.parsedAddress?.neighborhood}` : ''}` : userFrom?.address?.name
 
+          console.log('########## addressDetection 222 ##########', deliveryChoice.parsedAddress)
+
           if (addressFound) {
             await sendMessage({
               messaging_product: 'whatsapp',
@@ -867,7 +870,8 @@ export async function handleIncomingTextMessage(
 
             await updateConversation(currentConversation, {
               flow: 'ADDRESS_CONFIRMATION',
-              pendingAddress: addressFound
+              pendingAddress: addressFound,
+              pendingAddressObj: deliveryChoice.parsedAddress
             });
           } else {
 
@@ -875,7 +879,7 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 *POR FAVOR INFORME SEU ENDEREÇO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45' }
+              text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 *POR FAVOR, INFORME SEU ENDEREÇO COMPLETO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45, Jardim Ontário' }
             }, store.wabaEnvironments);
 
             await updateConversation(currentConversation, { flow: 'NEW_ADDRESS' });
@@ -894,7 +898,7 @@ export async function handleIncomingTextMessage(
             messaging_product: 'whatsapp',
             to: "+" + from,
             type: 'text',
-            text: { body: `📍 *INFORME SEU ENDEREÇO* 📍\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45` },
+            text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 POR FAVOR INFORME SEU *ENDEREÇO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45' }
           }, store.wabaEnvironments, true)
 
           return;
@@ -914,9 +918,57 @@ export async function handleIncomingTextMessage(
         return;
       }
 
+      // Handler para capturar o bairro
+      if (currentConversation?.flow === 'NEIGHBORHOOD_DETECTION') {
+        console.log('---------NEIGHBORHOOD DETECTION---------', message?.text?.body)
+
+        const neighborhood = message?.text?.body?.trim();
+        if (!neighborhood) {
+          await sendMessage({
+            messaging_product: 'whatsapp',
+            to: "+" + from,
+            type: 'text',
+            text: { body: '🏘️ *BAIRRO NECESSÁRIO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
+          }, store.wabaEnvironments);
+
+          return;
+        }
+
+        console.log('BAIRRO INFORMADO:', neighborhood);
+
+        // Atualizar o pendingAddressObj com o bairro
+        const updatedAddressObj = {
+          ...currentConversation.pendingAddressObj,
+          neighborhood: neighborhood
+        };
+
+        // Reconstruir o endereço completo com o bairro
+        const street = updatedAddressObj.street || '';
+        const number = updatedAddressObj.number || '';
+        const complement = updatedAddressObj.complement || '';
+
+        const fullAddress = `${street}${number ? ', ' + number : ''}${complement ? ', ' + complement : ''} - ${neighborhood}`;
+
+        console.log('ENDEREÇO COMPLETO COM BAIRRO:', fullAddress);
+
+        await sendMessage({
+          messaging_product: 'whatsapp',
+          to: "+" + from,
+          type: 'text',
+          text: { body: `📍 *CONFIRMAR ENDEREÇO COMPLETO* 📍\n\n🏠 *ENDEREÇO:*\n${fullAddress}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
+        }, store.wabaEnvironments);
+
+        await updateConversation(currentConversation, {
+          flow: 'ADDRESS_CONFIRMATION',
+          pendingAddress: fullAddress,
+          pendingAddressObj: updatedAddressObj
+        });
+
+        return;
+      }
+
       // verifica se e confirmacao de endereco
       if (currentConversation?.flow === 'ADDRESS_CONFIRMATION') {
-
         // Chamar OpenAI para interpretar a resposta do cliente
         const userResponse = message?.text?.body || '';
         const addressConfirmationResult = await interpretAddressConfirmation(userResponse);
@@ -927,15 +979,43 @@ export async function handleIncomingTextMessage(
           // Cliente confirmou o endereço
           console.log('Cliente confirmou o endereço');
 
+          // Verificar se o bairro foi informado
+          if (!currentConversation.pendingAddressObj?.neighborhood || currentConversation.pendingAddressObj.neighborhood.trim() === '') {
+            console.log('Bairro não informado - solicitando ao cliente');
+
+            await sendMessage({
+              messaging_product: 'whatsapp',
+              to: "+" + from,
+              type: 'text',
+              text: { body: '🏘️ *FALTA O BAIRRO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
+            }, store.wabaEnvironments);
+
+            await updateConversation(currentConversation, {
+              flow: 'NEIGHBORHOOD_DETECTION'
+            });
+
+            return;
+          }
+
           // Salvar endereço pendente como address da conversation
           const confirmedAddress = currentConversation.pendingAddress;
+          const addressObj = currentConversation.pendingAddressObj;
 
           // Delivery - Endereco obtido - processar produtos da mensagem original
           await updateConversation(currentConversation, {
             deliveryOption: 'delivery',
             flow: 'CATEGORIES',
-            address: confirmedAddress ? { name: confirmedAddress, main: true, neighborhood: '', number: '', zipCode: '', street: '' } : undefined,
-            pendingAddress: undefined // limpar o endereço pendente
+            address: confirmedAddress ? {
+              name: confirmedAddress,
+              main: true,
+              neighborhood: addressObj?.neighborhood || '',
+              number: addressObj?.number || '',
+              zipCode: '',
+              street: addressObj?.street || '',
+              complement: addressObj?.complement || ''
+            } : undefined,
+            pendingAddress: undefined, // limpar o endereço pendente
+            pendingAddressObj: undefined // limpar o objeto de endereço pendente
           });
 
           if (currentConversation.lastMessage) {
@@ -1203,12 +1283,13 @@ export async function handleIncomingTextMessage(
               type: 'text',
               text: { body: beautifulMenu }
             }, store.wabaEnvironments);
-
           }
-
         } else if (addressConfirmationResult.newAddress) {
           // Cliente forneceu um novo endereço
           console.log('Cliente forneceu novo endereço:', addressConfirmationResult.newAddress);
+
+          // Detectar e parsear o novo endereço fornecido
+          const newAddressDetection = await detectAddressInMessage(addressConfirmationResult.newAddress);
 
           await sendMessage({
             messaging_product: 'whatsapp',
@@ -1221,9 +1302,9 @@ export async function handleIncomingTextMessage(
           delete currentConversation.address;
           await updateConversation(currentConversation, {
             flow: 'ADDRESS_CONFIRMATION',
-            pendingAddress: addressConfirmationResult.newAddress // salvar novo endereço como pendente
+            pendingAddress: addressConfirmationResult.newAddress, // salvar novo endereço como pendente
+            pendingAddressObj: newAddressDetection?.parsedAddress || null // salvar objeto parseado
           });
-
         } else {
           // Cliente disse "não" - pedir novo endereço
           console.log('Cliente não confirmou o endereço');
@@ -1238,7 +1319,8 @@ export async function handleIncomingTextMessage(
           delete currentConversation.address;
           await updateConversation(currentConversation, {
             flow: 'NEW_ADDRESS',
-            pendingAddress: undefined // deletar endereço pendente
+            pendingAddress: null, // deletar endereço pendente
+            pendingAddressObj: null
           });
         }
 
@@ -1276,7 +1358,6 @@ export async function handleIncomingTextMessage(
         }
         // Se já tem itens no carrinho, primeiro verificar se quer finalizar ou adicionar mais
         if (currentConversation.cartItems && currentConversation.cartItems.length > 0) {
-
           if (customerIntent.intent === 'close_order') {
             // Cliente quer finalizar pedido - ir para seleção de pagamento
             await updateConversation(currentConversation, {
@@ -1340,6 +1421,7 @@ export async function handleIncomingTextMessage(
                   const remainingItems = updatedCartItems.map(item =>
                     `🔹 ${item.quantity}x ${item.menuName} - R$ ${(calculateItemTotalPrice(item)).toFixed(2)}\n`
                   ).join('\n');
+
                   const totalPrice = updatedCartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
 
                   responseMessage += `\n\n🛒 *Seu carrinho atual:*\n${remainingItems}\n\n💰 *Total: R$ ${totalPrice.toFixed(2)}*\n\nDeseja adicionar mais algum item ou finalizar o pedido?`;
@@ -1377,7 +1459,6 @@ export async function handleIncomingTextMessage(
 
           const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
 
-
           if (itensAmbiguos?.length > 1) {
             extractedProducts.ambiguidades[0].refining = true;
 
@@ -1402,7 +1483,6 @@ export async function handleIncomingTextMessage(
 
             await updateConversation(currentConversation, { flow: 'CATEGORIES' })
           }
-
         } else if (extractedProducts.items && extractedProducts.items.length > 0) {
           // Itens resolvidos diretamente, vamos confirmar com o cliente
           const itensResolvidos = extractedProducts.items.map((item: any) => {
@@ -1440,7 +1520,6 @@ export async function handleIncomingTextMessage(
             type: 'text',
             text: { body: `Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
           }, store.wabaEnvironments);
-
         } else {
           // Não encontrou produtos
           await sendMessage({
@@ -1646,7 +1725,7 @@ export async function handleIncomingTextMessage(
               messaging_product: 'whatsapp',
               to: "+" + from,
               type: 'text',
-              text: { body: `Ok, não vou adicionar esse item. O que mais você gostaria de pedir?` }
+              text: { body: `Entendi que não é para adicionar esse item. O que você gostaria de pedir?` }
             }, store.wabaEnvironments);
 
             await updateConversation(currentConversation, {

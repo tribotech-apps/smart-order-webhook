@@ -7,6 +7,7 @@ export type ConversationFlow =
   "CHECK_ADDRESS" |
   "ADDRESS_CONFIRMATION" |
   "NEW_ADDRESS" |
+  "NEIGHBORHOOD_DETECTION" |
   "CATEGORIES" |
   "PRODUCTS" |
   "PRODUCT_QUANTITY" |
@@ -92,7 +93,13 @@ export interface Conversation {
   pendingProductsQueue?: ResolvedItem[]; // fila de produtos que ainda precisam ter perguntas respondidas
   currentProcessingProduct?: ResolvedItem | null; // produto atualmente sendo processado
   returnToPayment?: boolean;
-  pendingAddress?: string; // endereço pendente de confirmação
+  pendingAddress?: string | null; // endereço pendente de confirmação
+  pendingAddressObj?: {
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    complement?: string;
+  } | null
 }
 
 export interface ResolvedItem {

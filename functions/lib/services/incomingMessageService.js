@@ -169,7 +169,7 @@ async function processNextProductInQueue(conversation, store, from) {
         // Sem mais produtos na fila - mostrar resumo final
         const subtotal = cartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
         const isDelivery = conversation.deliveryOption === 'delivery';
-        console.log('<-- DELIVERY OPTION 2 -->', conversation.deliveryOption);
+        console.log('<-- DELIVERY OPTION 2 -->', conversation.deliveryOption, store.deliveryPrice);
         const deliveryPrice = isDelivery ? (store.deliveryPrice || 0) : 0;
         const totalFinal = subtotal + deliveryPrice;
         const itemsSummary = cartItems.map((item) => generateItemDescription(item)).join('\n\n━━━━━━━━━━━━━━━━━━━━\n\n');
@@ -522,7 +522,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         });
                         // Verificar se a mensagem contém um endereço de entrega
                         const addressDetection = await (0, messageHelper_1.detectAddressInMessage)(message.text.body);
-                        console.log('addressDetection', addressDetection);
+                        console.log('########## addressDetection ##########', addressDetection);
                         if (addressDetection && addressDetection.hasAddress && addressDetection.confidence > 50) {
                             // Entrega - verificar endereço
                             await (0, conversationController_1.updateConversation)(currentConversation, {
@@ -539,7 +539,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                 }, store.wabaEnvironments);
                                 await (0, conversationController_1.updateConversation)(currentConversation, {
                                     flow: 'ADDRESS_CONFIRMATION',
-                                    pendingAddress: addressFound
+                                    pendingAddress: addressFound,
+                                    pendingAddressObj: addressDetection.parsedAddress
                                 });
                             }
                             else {
@@ -554,20 +555,21 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             return;
                         }
                         else {
-                            // const userFrom = await getUserByPhone(from);
-                            // if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
-                            //   await sendMessage({
-                            //     messaging_product: 'whatsapp',
-                            //     to: "+" + from,
-                            //     type: 'text',
-                            //     text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
-                            //   }, store.wabaEnvironments);
-                            //   await updateConversation(currentConversation, {
-                            //     flow: 'ADDRESS_CONFIRMATION',
-                            //     pendingAddress: userFrom.address.name
-                            //   });
-                            //   return;
-                            // }
+                            const userFrom = await (0, userController_1.getUserByPhone)(from);
+                            if (userFrom?.address?.name && userFrom?.address?.name !== 'Endereço não informado') {
+                                await (0, messagingService_1.sendMessage)({
+                                    messaging_product: 'whatsapp',
+                                    to: "+" + from,
+                                    type: 'text',
+                                    text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\nSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                                }, store.wabaEnvironments);
+                                await (0, conversationController_1.updateConversation)(currentConversation, {
+                                    flow: 'ADDRESS_CONFIRMATION',
+                                    pendingAddress: userFrom.address.name,
+                                    pendingAddressObj: userFrom.address
+                                });
+                                return;
+                            }
                         }
                         // Save message in conversartions
                         await (0, conversationController_1.updateConversation)(currentConversation, {
@@ -579,7 +581,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+                            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
                         }, store.wabaEnvironments, true);
                         break;
                     case "close_order":
@@ -605,7 +607,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por faovr, informe seu *ENDEREÇO PARA ENTREGA* OU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+                        text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
                     }, store.wabaEnvironments);
                     return;
                 }
@@ -698,6 +700,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     });
                     const userFrom = await (0, userController_1.getUserByPhone)(from);
                     const addressFound = deliveryChoice.parsedAddress?.street ? `${deliveryChoice.parsedAddress?.street} ${deliveryChoice.parsedAddress?.number ? `,${deliveryChoice.parsedAddress?.number}` : ''} ${deliveryChoice.parsedAddress?.neighborhood ? ` - ${deliveryChoice.parsedAddress?.neighborhood}` : ''}` : userFrom?.address?.name;
+                    console.log('########## addressDetection 222 ##########', deliveryChoice.parsedAddress);
                     if (addressFound) {
                         await (0, messagingService_1.sendMessage)({
                             messaging_product: 'whatsapp',
@@ -707,7 +710,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: 'ADDRESS_CONFIRMATION',
-                            pendingAddress: addressFound
+                            pendingAddress: addressFound,
+                            pendingAddressObj: deliveryChoice.parsedAddress
                         });
                     }
                     else {
@@ -715,7 +719,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 *POR FAVOR INFORME SEU ENDEREÇO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45' }
+                            text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 *POR FAVOR, INFORME SEU ENDEREÇO COMPLETO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45, Jardim Ontário' }
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'NEW_ADDRESS' });
                     }
@@ -730,7 +734,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: `📍 *INFORME SEU ENDEREÇO* 📍\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45` },
+                        text: { body: '✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 *INFORME SEU ENDEREÇO* 📍\n\n🏠 POR FAVOR INFORME SEU *ENDEREÇO*\n\n📝 *EXEMPLO:*\nRua das Torres, 123, apto 45' }
                     }, store.wabaEnvironments, true);
                     return;
                 }
@@ -744,6 +748,44 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'ADDRESS_CONFIRMATION' });
                 return;
             }
+            // Handler para capturar o bairro
+            if (currentConversation?.flow === 'NEIGHBORHOOD_DETECTION') {
+                console.log('---------NEIGHBORHOOD DETECTION---------', message?.text?.body);
+                const neighborhood = message?.text?.body?.trim();
+                if (!neighborhood) {
+                    await (0, messagingService_1.sendMessage)({
+                        messaging_product: 'whatsapp',
+                        to: "+" + from,
+                        type: 'text',
+                        text: { body: '🏘️ *BAIRRO NECESSÁRIO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
+                    }, store.wabaEnvironments);
+                    return;
+                }
+                console.log('BAIRRO INFORMADO:', neighborhood);
+                // Atualizar o pendingAddressObj com o bairro
+                const updatedAddressObj = {
+                    ...currentConversation.pendingAddressObj,
+                    neighborhood: neighborhood
+                };
+                // Reconstruir o endereço completo com o bairro
+                const street = updatedAddressObj.street || '';
+                const number = updatedAddressObj.number || '';
+                const complement = updatedAddressObj.complement || '';
+                const fullAddress = `${street}${number ? ', ' + number : ''}${complement ? ', ' + complement : ''} - ${neighborhood}`;
+                console.log('ENDEREÇO COMPLETO COM BAIRRO:', fullAddress);
+                await (0, messagingService_1.sendMessage)({
+                    messaging_product: 'whatsapp',
+                    to: "+" + from,
+                    type: 'text',
+                    text: { body: `📍 *CONFIRMAR ENDEREÇO COMPLETO* 📍\n\n🏠 *ENDEREÇO:*\n${fullAddress}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
+                }, store.wabaEnvironments);
+                await (0, conversationController_1.updateConversation)(currentConversation, {
+                    flow: 'ADDRESS_CONFIRMATION',
+                    pendingAddress: fullAddress,
+                    pendingAddressObj: updatedAddressObj
+                });
+                return;
+            }
             // verifica se e confirmacao de endereco
             if (currentConversation?.flow === 'ADDRESS_CONFIRMATION') {
                 // Chamar OpenAI para interpretar a resposta do cliente
@@ -753,14 +795,38 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 if (addressConfirmationResult.confirmed) {
                     // Cliente confirmou o endereço
                     console.log('Cliente confirmou o endereço');
+                    // Verificar se o bairro foi informado
+                    if (!currentConversation.pendingAddressObj?.neighborhood || currentConversation.pendingAddressObj.neighborhood.trim() === '') {
+                        console.log('Bairro não informado - solicitando ao cliente');
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: '🏘️ *FALTA O BAIRRO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
+                        }, store.wabaEnvironments);
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            flow: 'NEIGHBORHOOD_DETECTION'
+                        });
+                        return;
+                    }
                     // Salvar endereço pendente como address da conversation
                     const confirmedAddress = currentConversation.pendingAddress;
+                    const addressObj = currentConversation.pendingAddressObj;
                     // Delivery - Endereco obtido - processar produtos da mensagem original
                     await (0, conversationController_1.updateConversation)(currentConversation, {
                         deliveryOption: 'delivery',
                         flow: 'CATEGORIES',
-                        address: confirmedAddress ? { name: confirmedAddress, main: true, neighborhood: '', number: '', zipCode: '', street: '' } : undefined,
-                        pendingAddress: undefined // limpar o endereço pendente
+                        address: confirmedAddress ? {
+                            name: confirmedAddress,
+                            main: true,
+                            neighborhood: addressObj?.neighborhood || '',
+                            number: addressObj?.number || '',
+                            zipCode: '',
+                            street: addressObj?.street || '',
+                            complement: addressObj?.complement || ''
+                        } : undefined,
+                        pendingAddress: undefined, // limpar o endereço pendente
+                        pendingAddressObj: undefined // limpar o objeto de endereço pendente
                     });
                     if (currentConversation.lastMessage) {
                         const extractedProducts = await (0, messageHelper_1.extractProductsFromMessageWithAI)(currentConversation.lastMessage, (0, orderService_1.filterMenuByWeekday)(store.menu));
@@ -867,9 +933,130 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         }, store.wabaEnvironments);
                     }
                 }
+                else if (addressConfirmationResult.wantsPickup) {
+                    // Cliente mudou de ideia e quer retirar na loja
+                    console.log('Cliente mudou de ideia e quer retirada na loja');
+                    await (0, messagingService_1.sendMessage)({
+                        messaging_product: 'whatsapp',
+                        to: "+" + from,
+                        type: 'text',
+                        text: { body: '🏪 *RETIRADA NA LOJA* 🏪\n\n✅ Perfeito! Você poderá retirar seu pedido na loja.\n\n📝 Vamos continuar com seu pedido!' }
+                    }, store.wabaEnvironments);
+                    // Retirada - processar produtos da mensagem original
+                    await (0, conversationController_1.updateConversation)(currentConversation, {
+                        deliveryOption: 'counter',
+                        flow: 'CATEGORIES',
+                        address: undefined,
+                        pendingAddress: undefined // limpar o endereço pendente
+                    });
+                    if (currentConversation.lastMessage) {
+                        const extractedProducts = await (0, messageHelper_1.extractProductsFromMessageWithAI)(currentConversation.lastMessage, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                        if (extractedProducts?.ambiguidades?.length) {
+                            const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => {
+                                let itemText = `${item.menuName}`;
+                                if (item.price > 0) {
+                                    itemText += ` - R$ ${item.price.toFixed(2)}`;
+                                }
+                                // Encontrar o item completo do menu para obter as perguntas
+                                const fullMenuItem = store.menu.find(menuItem => menuItem.menuId === item.menuId);
+                                if (fullMenuItem && fullMenuItem.questions && fullMenuItem.questions.length > 0) {
+                                    const questionsText = fullMenuItem.questions.map(question => {
+                                        const answersText = question.answers ? question.answers.map(answer => {
+                                            let answerText = answer.answerName;
+                                            if (answer.price && answer.price > 0) {
+                                                answerText += ` (+R$ ${answer.price.toFixed(2)})`;
+                                            }
+                                            return answerText;
+                                        }).join(', ') : '';
+                                        return `\n  ${question.questionName}: ${answersText}`;
+                                    }).join('');
+                                    itemText += questionsText;
+                                }
+                                return itemText;
+                            }).join('\n\n');
+                            if (itensAmbiguos?.length > 1) {
+                                extractedProducts.ambiguidades[0].refining = true;
+                                await (0, conversationController_1.updateConversation)(currentConversation, {
+                                    flow: 'ORDER_REFINMENT',
+                                    refinmentItems: extractedProducts,
+                                });
+                                await (0, messagingService_1.sendMessage)({
+                                    messaging_product: 'whatsapp',
+                                    to: "+" + from,
+                                    type: 'text',
+                                    text: { body: `🔍 *ESCOLHA SEU PRODUTO* 🔍\n\n📝 V O C Ê   P E D I U:\n*${extractedProducts.ambiguidades[0].quantity}x ${extractedProducts.ambiguidades[0].palavra.toUpperCase()}*\n\n⬇️ *OPÇÕES DISPONÍVEIS* ⬇️\n\n${itensAmbiguos}\n\n❓ *QUAL OPÇÃO VOCÊ DESEJA?*` }
+                                }, store.wabaEnvironments);
+                            }
+                            else {
+                                await (0, messagingService_1.sendMessage)({
+                                    messaging_product: 'whatsapp',
+                                    to: "+" + from,
+                                    type: 'text',
+                                    text: { body: `❌ *PRODUTO NÃO ENCONTRADO* ❌\n\n🔍 N Ã O   C O N S E G U I   I D E N T I F I C A R\n\n📋 *POR FAVOR:*\nInforme produtos do nosso C A R D Á P I O\n\n📱 *Digite o nome do produto que deseja*` }
+                                }, store.wabaEnvironments);
+                                await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                            }
+                        }
+                        else if (extractedProducts.items && extractedProducts.items.length > 0) {
+                            const itensResolvidos = extractedProducts.items.map((item) => {
+                                const totalPrice = calculateItemPriceWithSelectedAnswers(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                                // Montar descrição dos opcionais com preços individuais
+                                let opcString = '';
+                                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+                                    const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
+                                    const opcionaisComPreco = [];
+                                    item.selectedAnswers.forEach((selectedAnswer) => {
+                                        const question = menuItem?.questions?.find((q) => q.questionId === selectedAnswer.questionId);
+                                        const originalAnswer = question?.answers?.find((a) => a.answerId === selectedAnswer.answerId);
+                                        opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''));
+                                    });
+                                    opcString = ` (${opcionaisComPreco.join(', ')})`;
+                                }
+                                return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+                            }).join('\n');
+                            await (0, conversationController_1.updateConversation)(currentConversation, {
+                                flow: 'ORDER_REFINMENT_CONFIRMATION',
+                                refinmentItems: extractedProducts
+                            });
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+                            }, store.wabaEnvironments);
+                        }
+                        else {
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `✅ *Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
+                            }, store.wabaEnvironments);
+                            await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                        }
+                    }
+                    else {
+                        await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                        // Cliente já definiu retirada - enviar cardápio
+                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []));
+                        // Atualizar histórico da conversa
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente mudou para retirada na loja, cardápio enviado`
+                        });
+                        // Enviar cardápio formatado para o cliente
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: beautifulMenu }
+                        }, store.wabaEnvironments);
+                    }
+                }
                 else if (addressConfirmationResult.newAddress) {
                     // Cliente forneceu um novo endereço
                     console.log('Cliente forneceu novo endereço:', addressConfirmationResult.newAddress);
+                    // Detectar e parsear o novo endereço fornecido
+                    const newAddressDetection = await (0, messageHelper_1.detectAddressInMessage)(addressConfirmationResult.newAddress);
                     await (0, messagingService_1.sendMessage)({
                         messaging_product: 'whatsapp',
                         to: "+" + from,
@@ -880,7 +1067,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     delete currentConversation.address;
                     await (0, conversationController_1.updateConversation)(currentConversation, {
                         flow: 'ADDRESS_CONFIRMATION',
-                        pendingAddress: addressConfirmationResult.newAddress // salvar novo endereço como pendente
+                        pendingAddress: addressConfirmationResult.newAddress, // salvar novo endereço como pendente
+                        pendingAddressObj: newAddressDetection?.parsedAddress || null // salvar objeto parseado
                     });
                 }
                 else {
@@ -895,7 +1083,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     delete currentConversation.address;
                     await (0, conversationController_1.updateConversation)(currentConversation, {
                         flow: 'NEW_ADDRESS',
-                        pendingAddress: undefined // deletar endereço pendente
+                        pendingAddress: null, // deletar endereço pendente
+                        pendingAddressObj: null
                     });
                 }
                 return;
@@ -1221,7 +1410,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `Ok, não vou adicionar esse item. O que mais você gostaria de pedir?` }
+                            text: { body: `Entendi que não é para adicionar adicionar esse item. O que você gostaria de pedir?` }
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: 'CATEGORIES',
@@ -2137,18 +2326,25 @@ O cliente foi perguntado se confirma um endereço específico. Você deve analis
 {
   "confirmed": boolean, // true se cliente confirmou (sim, correto, ok, etc.)
   "newAddress": string | null, // novo endereço se cliente forneceu um
+  "wantsPickup": boolean, // true se cliente mudou de ideia e quer retirar na loja
   "response": string // interpretação da resposta
 }
 
 EXEMPLOS:
 
-Cliente: "sim" → {"confirmed": true, "newAddress": null, "response": "confirmado"}
-Cliente: "correto" → {"confirmed": true, "newAddress": null, "response": "confirmado"}  
-Cliente: "ok" → {"confirmed": true, "newAddress": null, "response": "confirmado"}
-Cliente: "não" → {"confirmed": false, "newAddress": null, "response": "negado"}
-Cliente: "nao" → {"confirmed": false, "newAddress": null, "response": "negado"}
-Cliente: "não, é Rua José Roberto, 82" → {"confirmed": false, "newAddress": "Rua José Roberto, 82", "response": "forneceu novo endereço"}
-Cliente: "errado, meu endereço é Avenida Brasil, 123" → {"confirmed": false, "newAddress": "Avenida Brasil, 123", "response": "forneceu novo endereço"}
+Cliente: "sim" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "correto" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "ok" → {"confirmed": true, "newAddress": null, "wantsPickup": false, "response": "confirmado"}
+Cliente: "não" → {"confirmed": false, "newAddress": null, "wantsPickup": false, "response": "negado"}
+Cliente: "nao" → {"confirmed": false, "newAddress": null, "wantsPickup": false, "response": "negado"}
+Cliente: "não, é Rua José Roberto, 82" → {"confirmed": false, "newAddress": "Rua José Roberto, 82", "wantsPickup": false, "response": "forneceu novo endereço"}
+Cliente: "errado, meu endereço é Avenida Brasil, 123" → {"confirmed": false, "newAddress": "Avenida Brasil, 123", "wantsPickup": false, "response": "forneceu novo endereço"}
+Cliente: "prefiro retirar na loja" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "vou buscar aí" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "retirada" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "vou pegar na loja" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "balcão" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
+Cliente: "pego lá" → {"confirmed": false, "newAddress": null, "wantsPickup": true, "response": "quer retirada"}
 
 Retorne APENAS o JSON, sem texto adicional.`;
     const response = await openAIClient.chat.completions.create({
@@ -2168,6 +2364,7 @@ Retorne APENAS o JSON, sem texto adicional.`;
         return {
             confirmed: parsed.confirmed || false,
             newAddress: parsed.newAddress || null,
+            wantsPickup: parsed.wantsPickup || false,
             response: parsed.response || 'não interpretado'
         };
     }
@@ -2176,6 +2373,7 @@ Retorne APENAS o JSON, sem texto adicional.`;
         return {
             confirmed: false,
             newAddress: null,
+            wantsPickup: false,
             response: 'erro na interpretação'
         };
     }
