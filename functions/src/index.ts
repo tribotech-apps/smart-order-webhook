@@ -40,6 +40,7 @@ import notificationsRouter from './routes/bots/notifications';
 import workflowRouter from './routes/bots/workflow';
 import diagnosticsRouter from './routes/diagnostics';
 import deviceTokensRouter from './routes/deviceTokens';
+import mercadoPagoRouter from './routes/bots/mercadopago';
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use(cookieParser());
 app.use('/whatsapp/messages', botsSellerRouter);
 app.use('/whatsapp/bot', botMessagesRouter);
 app.use('/payments', paymentsRouter);
+app.use('/mercadopago', mercadoPagoRouter);
 app.use('/stores', storeRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/workflow', workflowRouter);

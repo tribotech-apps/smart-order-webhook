@@ -80,3 +80,25 @@ export enum OrderFlow {
 }
 
 export interface ShoppingCartType extends OrderType { }
+
+// Pedido pendente aguardando confirmação de pagamento
+export interface PendingOrder {
+  mercadoPagoPreferenceId?: string; // ID da preferência do Mercado Pago
+  mercadoPagoPaymentId?: string; // ID do pagamento (quando for PIX direto)
+  phoneNumber: string;
+  storeId: string;
+  customerName: string;
+  customerDocument?: string;
+  deliveryOption: 'COUNTER' | 'DELIVERY';
+  address?: Address;
+  items: OrderItemType[];
+  totalPrice: number;
+  deliveryPrice: number;
+  paymentMethod: PaymentMethodType;
+  paymentLinkUrl?: string; // Link de pagamento enviado ao cliente
+  externalReference: string; // ID único para rastrear (ex: conversation-{docId}-{timestamp})
+  createdAt: Timestamp;
+  expiresAt?: Timestamp; // Timestamp de expiração (24h após criação)
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired';
+  conversationData?: any; // Dados da conversa para recriar contexto se necessário
+}

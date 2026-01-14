@@ -44,6 +44,7 @@ export interface MenuItem {
   maxQuantity?: number;
   minQuantity?: number;
   singleProduct?: boolean;
+  alternativeNames?: string[]; // Nomes alternativos separados por vírgula para facilitar busca 
 }
 
 export type QuestionType = 'RADIO' | 'CHECK' | 'QUANTITY';

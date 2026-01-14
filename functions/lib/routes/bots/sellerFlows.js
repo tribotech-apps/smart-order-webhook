@@ -173,7 +173,7 @@ router.post('/webhook', async (req, res) => {
                                     date: new Date(),
                                     phoneNumber: from,
                                     flow: 'WELCOME',
-                                    selectedAnswers: [],
+                                    // selectedAnswers: [],
                                     deliveryPrice: store.deliveryPrice,
                                     flowToken,
                                     customerName,

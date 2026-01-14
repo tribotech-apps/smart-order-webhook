@@ -76,6 +76,7 @@ const notifications_1 = __importDefault(require("./routes/bots/notifications"));
 const workflow_1 = __importDefault(require("./routes/bots/workflow"));
 const diagnostics_1 = __importDefault(require("./routes/diagnostics"));
 const deviceTokens_1 = __importDefault(require("./routes/deviceTokens"));
+const mercadopago_1 = __importDefault(require("./routes/bots/mercadopago"));
 const app = (0, express_1.default)();
 // Middlewares
 app.use((0, cors_1.default)());
@@ -89,6 +90,7 @@ app.use((0, cookie_parser_1.default)());
 app.use('/whatsapp/messages', sellerFlows_1.default);
 app.use('/whatsapp/bot', messages_1.default);
 app.use('/payments', payments_1.default);
+app.use('/mercadopago', mercadopago_1.default);
 app.use('/stores', store_1.default);
 app.use('/notifications', notifications_1.default);
 app.use('/workflow', workflow_1.default);

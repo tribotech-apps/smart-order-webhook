@@ -106,7 +106,7 @@ Regras de classificação (priorize na ordem):
 
 - "change_quantity": alterar quantidade ou adicionar mais ("mais uma coca", "coloca 3 marmitex", "tira uma", "agora quero 2").
 
-- "replace_product": trocar um produto ("troca o frango por bife", "em vez da coca quero guaraná").
+- "replace_product": trocar um produto por outro ("troca o frango por bife", "em vez da coca quero guaraná", "quero trocar a pizza brotinho pela grande", "trocar o pequeno pelo médio", "muda a pizza de mussarela para calabresa").
 
 - "remove_product": remover algo ("cancela a coca", "tira o marmitex pequeno", "remove o sorvete", "não quero mais isso"). IMPORTANTE: Quando for remove_product, você DEVE identificar quais itens específicos do pedido atual devem ser removidos e incluir no array "items" com menuId e quantity exatos.
 
@@ -149,6 +149,53 @@ Resposta: {
   "intent": "remove_product",
   "items": [{"menuId": 1, "quantity": 2}, {"menuId": 5, "quantity": 1}]
 }
+
+EXEMPLOS PARA REPLACE_PRODUCT:
+
+Cliente: "quero trocar a pizza brotinho pela grande"
+Pedido atual: [{"menuId": 10, "menuName": "Pizza Brotinho", "quantity": 1}]
+Resposta: {
+  "intent": "replace_product",
+  "details": {
+    "productToChange": "pizza brotinho",
+    "newProduct": "pizza grande"
+  }
+}
+
+Cliente: "troca o marmitex pequeno pelo médio"
+Pedido atual: [{"menuId": 1, "menuName": "Marmitex Pequeno", "quantity": 1}]
+Resposta: {
+  "intent": "replace_product",
+  "details": {
+    "productToChange": "marmitex pequeno",
+    "newProduct": "marmitex médio"
+  }
+}
+
+Cliente: "em vez da coca quero guaraná"
+Pedido atual: [{"menuId": 15, "menuName": "Coca-Cola Lata", "quantity": 1}]
+Resposta: {
+  "intent": "replace_product",
+  "details": {
+    "productToChange": "coca",
+    "newProduct": "guaraná"
+  }
+}
+
+Cliente: "muda a pizza de mussarela para calabresa"
+Pedido atual: [{"menuId": 20, "menuName": "Pizza de Mussarela", "quantity": 1}]
+Resposta: {
+  "intent": "replace_product",
+  "details": {
+    "productToChange": "pizza de mussarela",
+    "newProduct": "pizza de calabresa"
+  }
+}
+
+REGRAS PARA REPLACE_PRODUCT:
+1. Detecte palavras-chave: "trocar", "troca", "em vez de", "ao invés de", "muda", "mudar", "pela", "pelo", "para"
+2. Identifique o produto atual (productToChange) e o produto novo (newProduct)
+3. SEMPRE preencha ambos os campos: productToChange e newProduct
 `;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -637,16 +684,143 @@ export async function extractProductsFromMessageWithAI(
   }
 
   const systemPrompt = `
-TAREFA: Identifique produtos do cardápio na mensagem do cliente.
+TAREFA: Identifique a INTENÇÃO da mensagem e extraia produtos se aplicável.
+
+⚠️ PRIMEIRA ETAPA - DETECTAR INTENÇÃO ⚠️
+Antes de extrair produtos, identifique se o cliente está:
+1. **PEDINDO** (ordering): "quero uma pizza", "manda um marmitex", "me dá uma coca"
+2. **PERGUNTANDO** (asking): "vocês tem pizza?", "tem pepperoni aí?", "vende coca?"
+3. **PERGUNTANDO SOBRE ENTREGA** (asking_delivery): "vocês entregam em [endereço]?", "entrega no bairro X?"
+
+REGRAS DE INTENÇÃO (ORDEM DE PRIORIDADE):
+
+1. **PERGUNTAS EXPLÍCITAS** (tem palavras interrogativas + produto):
+   - "tem?", "vocês tem?", "tem aí?", "vende?", "fazem?", "existe?" → intent: "asking"
+   - "entregam?", "vocês entregam?" → intent: "asking_delivery"
+
+2. **PEDIDOS EXPLÍCITOS** (tem palavras de pedido):
+   - "quero", "manda", "pode mandar", "me dá", "vou querer", "pede" → intent: "ordering"
+
+3. **APENAS NOME DO PRODUTO** (SEM palavras interrogativas):
+   - Se menciona APENAS o nome do produto (ex: "marmitex", "pizza", "coca") → intent: "ordering"
+   - REGRA: Se NÃO tem palavras interrogativas, assumir que é PEDIDO
+
+EXEMPLOS DE INTENÇÃO:
+
+PEDIDOS (ordering):
+"quero uma pizza de mussarela" → intent: "ordering" → EXTRAIR produtos
+"manda um marmitex e uma coca" → intent: "ordering" → EXTRAIR produtos
+"pode mandar uma coca lata" → intent: "ordering" → EXTRAIR produtos
+"vou querer dois guaranás" → intent: "ordering" → EXTRAIR produtos
+"marmitex" → intent: "ordering" → EXTRAIR produtos ✅ (sem palavra interrogativa)
+"pizza de calabresa" → intent: "ordering" → EXTRAIR produtos ✅ (sem palavra interrogativa)
+"uma coca" → intent: "ordering" → EXTRAIR produtos ✅ (sem palavra interrogativa)
+"dois guaranás" → intent: "ordering" → EXTRAIR produtos ✅ (sem palavra interrogativa)
+
+PERGUNTAS (asking):
+"vocês tem pizza de pepperoni aí?" → intent: "asking" → NÃO EXTRAIR (tem "tem?")
+"tem marmitex?" → intent: "asking" → NÃO EXTRAIR (tem "tem?")
+"fazem pizza de calabresa?" → intent: "asking" → NÃO EXTRAIR (tem "fazem?")
+"vende coca?" → intent: "asking" → NÃO EXTRAIR (tem "vende?")
+
+PERGUNTAS SOBRE ENTREGA (asking_delivery):
+"vocês entregam na rua das flores?" → intent: "asking_delivery" → NÃO EXTRAIR
+"entrega no bairro X?" → intent: "asking_delivery" → NÃO EXTRAIR
+
+REGRA CRÍTICA: Se a mensagem NÃO contém palavras interrogativas ("tem?", "fazem?", "vende?", "existe?", "entregam?"), SEMPRE trate como "ordering"
+
+TAREFA: Identifique produtos do cardápio na mensagem do cliente APENAS se intent = "ordering".
+
+⚠️ REGRA CRÍTICA - SEMPRE RETORNE OS IDs ⚠️
+VOCÊ DEVE SEMPRE BUSCAR E RETORNAR:
+1. menuId: Busque no cardápio JSON abaixo e retorne o menuId EXATO
+2. questionId: Se houver selectedAnswers, busque o questionId nas questions do produto
+3. answerId: Se houver selectedAnswers, busque o answerId nas answers da question
+4. price: Copie o price do produto do cardápio
+NUNCA retorne apenas nomes sem IDs. SEMPRE inclua menuId, questionId, answerId quando aplicável.
 
 REGRA CRÍTICA: Processe cada produto individualmente. Se um não existir, ignore-o e continue com os outros.
+
+⚠️ REGRA CRÍTICA - NUNCA INFERIR INFORMAÇÕES ⚠️
+VOCÊ NÃO PODE ASSUMIR, INFERIR OU ADICIONAR INFORMAÇÕES QUE O CLIENTE NÃO MENCIONOU EXPLICITAMENTE.
+
+EXEMPLOS PROIBIDOS:
+❌ Cliente: "uma pizza" → VOCÊ NÃO PODE escolher "Pizza de Mussarela" (cliente não mencionou mussarela)
+❌ Cliente: "um marmitex" → VOCÊ NÃO PODE escolher "Marmitex Pequeno" (cliente não mencionou pequeno)
+❌ Cliente: "uma coca" → VOCÊ NÃO PODE escolher "Coca-Cola Lata" (cliente não mencionou lata)
+
+QUANDO O CLIENTE NÃO ESPECIFICA:
+✅ Cliente: "uma pizza" + Cardápio tem: ["Pizza de Mussarela", "Pizza de Calabresa", "Pizza Margherita"]
+   → Retorne AMBIGUIDADE com todas as 3 opções (deixe o cliente escolher)
+
+✅ Cliente: "um marmitex" + Cardápio tem: ["Marmitex Pequeno", "Marmitex Médio", "Marmitex Grande"]
+   → Retorne AMBIGUIDADE com todas as 3 opções
+
+✅ Cliente: "uma coca" + Cardápio tem: ["Coca-Cola Lata 350ml", "Coca-Cola 2L"]
+   → Retorne AMBIGUIDADE com ambas opções
+
+QUANDO O CLIENTE ESPECIFICA:
+✅ Cliente: "uma pizza de mussarela" → Pode escolher "Pizza de Mussarela" (especificou mussarela)
+✅ Cliente: "marmitex médio" → Pode escolher "Marmitex Médio" (especificou médio)
+✅ Cliente: "coca lata" → Pode escolher "Coca-Cola Lata" (especificou lata)
+
+REGRA: Se a mensagem do cliente é GENÉRICA (sem especificar sabor/tamanho/tipo) e existem MÚLTIPLAS opções no cardápio, SEMPRE crie uma AMBIGUIDADE.
+
+⚠️ REGRA CRÍTICA DE MATCHING - PRIORIZAR MAIS PALAVRAS EM COMUM ⚠️
+Quando houver MÚLTIPLOS produtos similares no cardápio, SEMPRE escolha aquele que tem MAIS PALAVRAS EM COMUM com a mensagem do cliente.
+
+ALGORITMO DE MATCHING OBRIGATÓRIO:
+1. Normalize a mensagem do cliente (lowercase, sem acentos)
+2. Normalize todos os nomes de produtos do cardápio
+3. Para cada produto candidato, conte quantas palavras da mensagem aparecem no nome do produto
+4. SEMPRE escolha o produto com MAIOR número de palavras em comum
+5. NUNCA escolha um produto com menos palavras em comum quando existe um com mais
+
+EXEMPLOS CRÍTICOS:
+Cliente: "um pedaço de pizza de mussarela"
+Cardápio: [
+  {"menuName": "Pizza de Mussarela"},
+  {"menuName": "Pedaço de Pizza de Mussarela"}
+]
+→ "Pizza de Mussarela" = 3 palavras em comum (pizza, de, mussarela)
+→ "Pedaço de Pizza de Mussarela" = 5 palavras em comum (pedaço, de, pizza, de, mussarela)
+→ ESCOLHA: "Pedaço de Pizza de Mussarela" ✅ (MAIS palavras em comum)
+
+Cliente: "quero uma pizza grande"
+Cardápio: [
+  {"menuName": "Pizza"},
+  {"menuName": "Pizza Grande"}
+]
+→ "Pizza" = 1 palavra em comum (pizza)
+→ "Pizza Grande" = 2 palavras em comum (pizza, grande)
+→ ESCOLHA: "Pizza Grande" ✅ (MAIS palavras em comum)
+
+Cliente: "marmitex pequeno"
+Cardápio: [
+  {"menuName": "Marmitex"},
+  {"menuName": "Marmitex Pequeno"},
+  {"menuName": "Marmitex Grande"}
+]
+→ "Marmitex" = 1 palavra em comum (marmitex)
+→ "Marmitex Pequeno" = 2 palavras em comum (marmitex, pequeno)
+→ "Marmitex Grande" = 1 palavra em comum (marmitex)
+→ ESCOLHA: "Marmitex Pequeno" ✅ (MAIS palavras em comum)
 
 CARDÁPIO COMPLETO COM PERGUNTAS E RESPOSTAS:
 ${JSON.stringify(cardapio, null, 2)}
 
+IMPORTANTE - NOMES ALTERNATIVOS:
+- Alguns produtos têm o campo "alternativeNames" com nomes alternativos separados por vírgula
+- Você DEVE considerar tanto o "menuName" quanto os "alternativeNames" ao buscar produtos
+- Exemplo: Se o produto tem menuName="pizza 2 sabores" e alternativeNames="pizza meio mussarela meio calabresa, meio a meio, meio sabor 1 meio sabor 2"
+  → Cliente pode pedir: "quero uma tubaina" ou "me dá uma taubaina"
+- SEMPRE busque por correspondência em AMBOS os campos (menuName E alternativeNames)
+
 ALGORITMO:
 1. Divida a mensagem em produtos (ex: "marmitex médio e sorvete de chocolate" = 2 produtos: "marmitex médio", "sorvete de chocolate")
 2. Para cada produto: busque nome similar no cardápio (ignore acentos/case)
+   - Busque no menuName do produto
+   - Busque também nos alternativeNames se existir
    IMPORTANTE: "sorvete de chocolate" deve buscar por "sorvete" no cardápio
 3. Decisão: 0 match = ignore | 1 match = item direto | 2+ matches = ambiguidade
 4. Para items diretos com questions/answers: REGRAS PARA EXTRAÇÃO DE RESPOSTAS
@@ -662,36 +836,69 @@ ALGORITMO:
    - "marmitex médio" sem especificar carne (obrigatória) → AMBIGUIDADE
    - "marmitex médio com frango" especificando carne obrigatória → item direto
 
-EXEMPLOS CORRETOS:
+EXEMPLOS CORRETOS COM IDs REAIS:
+
+EXEMPLO 1 - Como buscar IDs:
+Cliente: "quero uma coca cola"
+Cardápio tem: {"menuId": 15, "menuName": "Coca-Cola Lata", "price": 5.00}
+→ items: [{"menuId": 15, "menuName": "Coca-Cola Lata", "quantity": 1, "price": 5.00}]
+
+EXEMPLO 2 - Produto com selectedAnswers:
+Cliente: "quero sorvete de chocolate"
+Cardápio tem: {
+  "menuId": 20,
+  "menuName": "Sorvete",
+  "price": 8.00,
+  "questions": [{
+    "questionId": 100,
+    "questionName": "Sabor",
+    "answers": [
+      {"answerId": 200, "answerName": "Chocolate", "price": 0},
+      {"answerId": 201, "answerName": "Morango", "price": 0}
+    ]
+  }]
+}
+→ items: [{
+  "menuId": 20,
+  "menuName": "Sorvete",
+  "quantity": 1,
+  "price": 8.00,
+  "selectedAnswers": [
+    {"questionId": 100, "answerId": 200, "answerName": "Chocolate"}
+  ]
+}]
 
 PRODUTO ÚNICO (mais permissivo):
-"marmitex médio" com produto que tem pergunta obrigatória "Escolha a carne" 
+"marmitex médio" com produto que tem pergunta obrigatória "Escolha a carne"
 → items: []
-→ ambiguidades: [{"palavra": "marmitex médio", "quantity": 1, "items": [produto]}] (precisa escolher carne)
-
-"sorvete de chocolate" com produto que tem pergunta opcional de sabor
-→ items: [{"menuName": "Sorvete", "quantity": 1, "selectedAnswers": [{"questionId": [ID_REAL], "answerId": [ID_REAL], "answerName": "Chocolate"}]}]
+→ ambiguidades: [{"palavra": "marmitex médio", "quantity": 1, "items": [{"menuId": 10, "menuName": "Marmitex Médio", "price": 25.00}]}]
 
 MÚLTIPLOS PRODUTOS (inteligente):
-"marmitex médio e sorvete de chocolate" = 2 produtos com perguntas
-→ ANALISE CADA PRODUTO:
-   - "sorvete de chocolate": cliente especificou "chocolate" → extrair como selectedAnswer
-   - "marmitex médio": cliente NÃO especificou carne obrigatória → vai para ambiguidades
-→ items: [{"menuName": "Sorvete", "selectedAnswers": [{"questionId": X, "answerId": Y, "answerName": "Chocolate"}]}]
-→ ambiguidades: [{"palavra": "marmitex médio", "quantity": 1, "items": [produto_marmitex]}]
-
-"marmitex médio com parmegiana e bife acebolado e sorvete de morango"
-→ ANALISE CADA PRODUTO:
-   - "marmitex médio": cliente especificou "parmegiana" e "bife acebolado" → extrair como selectedAnswers
-   - "sorvete": cliente especificou "morango" → extrair como selectedAnswer
-→ items: [
-    {"menuName": "Marmitex Médio", "selectedAnswers": [{"answerId": X, "answerName": "Parmegiana"}, {"answerId": Y, "answerName": "Bife Acebolado"}]},
-    {"menuName": "Sorvete", "selectedAnswers": [{"answerId": Z, "answerName": "Morango"}]}
-]
-
 "2 guaranás e coca" = produtos SEM perguntas
-→ items: [{"menuName": "Guaraná Lata", "quantity": 2}, {"menuName": "Coca Lata", "quantity": 1}]
-→ ambiguidades: [] (produtos simples podem ir direto)
+Cardápio: [
+  {"menuId": 15, "menuName": "Coca-Cola Lata", "price": 5.00},
+  {"menuId": 16, "menuName": "Guaraná Lata", "price": 4.50}
+]
+→ items: [
+  {"menuId": 16, "menuName": "Guaraná Lata", "quantity": 2, "price": 4.50},
+  {"menuId": 15, "menuName": "Coca-Cola Lata", "quantity": 1, "price": 5.00}
+]
+→ ambiguidades: []
+
+"marmitex médio com parmegiana e bife acebolado"
+→ Busque no cardápio o menuId do "Marmitex Médio"
+→ Busque questionId da pergunta "Escolha as carnes"
+→ Busque answerId de "Parmegiana" e "Bife Acebolado"
+→ items: [{
+  "menuId": [ID_DO_CARDAPIO],
+  "menuName": "Marmitex Médio",
+  "quantity": 1,
+  "price": [PRECO_DO_CARDAPIO],
+  "selectedAnswers": [
+    {"questionId": [ID_QUESTION], "answerId": [ID_PARMEGIANA], "answerName": "Parmegiana"},
+    {"questionId": [ID_QUESTION], "answerId": [ID_BIFE], "answerName": "Bife Acebolado"}
+  ]
+}]
 
 "marmitex médio com frango e sorvete de chocolate" = especificação clara
 → items: [{"menuName": "Marmitex Médio", "selectedAnswers": [frango]}, {"menuName": "Sorvete", "selectedAnswers": [chocolate]}]
@@ -704,12 +911,159 @@ EXEMPLO ESPECÍFICO DO USUÁRIO:
     {"menuName": "Sorvete", "selectedAnswers": [{"answerName": "Morango"}]}
 ]
 
+EXEMPLOS COM NOMES ALTERNATIVOS (alternativeNames):
+"quero uma tubaina" onde há produto: {"menuName": "Guaraná Dolly", "alternativeNames": "tubaina, taubaina, dolly"}
+→ items: [{"menuName": "Guaraná Dolly", "quantity": 1}] (reconhece "tubaina" pelo alternativeNames)
+
+"me dá uma pizza meio a meio mussarela e calabresa" onde há: {"menuName": "Pizza 2 Sabores", "alternativeNames": "pizza meio sabor, pizza meio a meio, pizza metade"}
+→ items: [{"menuName": "Pizza 2 Sabores", "quantity": 1, "selectedAnswers": [...]}] (reconhece pelo alternativeNames)
+
+EXEMPLOS CRÍTICOS DE AMBIGUIDADE (NÃO INFERIR):
+
+Cliente: "uma pizza"
+Cardápio: [
+  {"menuId": 1, "menuName": "Pizza de Mussarela", "price": 35},
+  {"menuId": 2, "menuName": "Pizza de Calabresa", "price": 38},
+  {"menuId": 3, "menuName": "Pizza Margherita", "price": 40}
+]
+→ CORRETO: {
+  "items": [],
+  "ambiguidades": [{
+    "id": "amb_123",
+    "palavra": "pizza",
+    "quantity": 1,
+    "items": [
+      {"menuId": 1, "menuName": "Pizza de Mussarela", "price": 35},
+      {"menuId": 2, "menuName": "Pizza de Calabresa", "price": 38},
+      {"menuId": 3, "menuName": "Pizza Margherita", "price": 40}
+    ]
+  }]
+}
+❌ ERRADO: escolher "Pizza de Mussarela" sozinha (cliente NÃO mencionou mussarela)
+
+Cliente: "um marmitex"
+Cardápio: [
+  {"menuId": 10, "menuName": "Marmitex Pequeno", "price": 20},
+  {"menuId": 11, "menuName": "Marmitex Médio", "price": 25},
+  {"menuId": 12, "menuName": "Marmitex Grande", "price": 30}
+]
+→ CORRETO: {
+  "items": [],
+  "ambiguidades": [{
+    "palavra": "marmitex",
+    "quantity": 1,
+    "items": [
+      {"menuId": 10, "menuName": "Marmitex Pequeno", "price": 20},
+      {"menuId": 11, "menuName": "Marmitex Médio", "price": 25},
+      {"menuId": 12, "menuName": "Marmitex Grande", "price": 30}
+    ]
+  }]
+}
+❌ ERRADO: escolher "Marmitex Médio" sozinho (cliente NÃO mencionou médio)
+
+Cliente: "quero uma coca"
+Cardápio: [
+  {"menuId": 20, "menuName": "Coca-Cola Lata 350ml", "price": 5},
+  {"menuId": 21, "menuName": "Coca-Cola 2L", "price": 10}
+]
+→ CORRETO: {
+  "items": [],
+  "ambiguidades": [{
+    "palavra": "coca",
+    "quantity": 1,
+    "items": [
+      {"menuId": 20, "menuName": "Coca-Cola Lata 350ml", "price": 5},
+      {"menuId": 21, "menuName": "Coca-Cola 2L", "price": 10}
+    ]
+  }]
+}
+❌ ERRADO: escolher "Coca-Cola Lata 350ml" sozinha (cliente NÃO mencionou lata)
+
 REGRA CRÍTICA: Se um produto tem perguntas obrigatórias (minAnswerRequired > 0) não respondidas pelo cliente, SEMPRE coloque em ambiguidades para o cliente escolher depois.
 
-JSON: {
-  "items": [{"menuId": number, "menuName": "string", "quantity": number, "palavra": "string", "price": number, "selectedAnswers"?: [{"questionId": number, "answerId": number, "answerName": "string", "quantity"?: number, "price"?: number}]}],
-  "ambiguidades": [{"id": "string", "palavra": "string", "quantity": number, "items": [{"menuId": number, "menuName": "string", "price": number}]}]
+REGRA OBRIGATÓRIA - IDs:
+VOCÊ DEVE SEMPRE RETORNAR OS IDs DO CARDÁPIO:
+- menuId (OBRIGATÓRIO): Busque no cardápio e retorne o menuId EXATO do produto
+- questionId (OBRIGATÓRIO para selectedAnswers): Busque nas questions do produto
+- answerId (OBRIGATÓRIO para selectedAnswers): Busque nas answers da question
+- NUNCA retorne apenas nomes sem IDs
+- SEMPRE busque os IDs correspondentes no cardápio fornecido em JSON
+
+FORMATO JSON OBRIGATÓRIO:
+{
+  "intent": "ordering" | "asking" | "asking_delivery",
+  "items": [
+    {
+      "menuId": number (OBRIGATÓRIO - busque no cardápio),
+      "menuName": "string",
+      "quantity": number,
+      "palavra": "string",
+      "price": number,
+      "selectedAnswers"?: [
+        {
+          "questionId": number (OBRIGATÓRIO),
+          "answerId": number (OBRIGATÓRIO),
+          "answerName": "string",
+          "quantity"?: number,
+          "price"?: number
+        }
+      ]
+    }
+  ],
+  "ambiguidades": [
+    {
+      "id": "string",
+      "palavra": "string",
+      "quantity": number,
+      "items": [
+        {
+          "menuId": number (OBRIGATÓRIO),
+          "menuName": "string",
+          "price": number
+        }
+      ]
+    }
+  ]
 }
+
+EXEMPLOS COMPLETOS COM INTENÇÃO:
+
+EXEMPLO 1 - PEDIDO (extrair produtos):
+Cliente: "quero uma pizza de mussarela"
+→ {
+  "intent": "ordering",
+  "items": [{"menuId": 10, "menuName": "Pizza de Mussarela", "quantity": 1, "price": 35.00}],
+  "ambiguidades": []
+}
+
+EXEMPLO 2 - PERGUNTA (NÃO extrair):
+Cliente: "vocês tem pizza de pepperoni aí?"
+→ {
+  "intent": "asking",
+  "items": [],
+  "ambiguidades": []
+}
+
+EXEMPLO 3 - PERGUNTA SOBRE ENTREGA (NÃO extrair):
+Cliente: "vocês entregam na rua das flores?"
+→ {
+  "intent": "asking_delivery",
+  "items": [],
+  "ambiguidades": []
+}
+
+EXEMPLO 4 - PEDIDO MÚLTIPLO (extrair produtos):
+Cliente: "manda um marmitex médio e uma coca"
+→ {
+  "intent": "ordering",
+  "items": [
+    {"menuId": 5, "menuName": "Marmitex Médio", "quantity": 1, "price": 25.00},
+    {"menuId": 15, "menuName": "Coca-Cola Lata", "quantity": 1, "price": 5.00}
+  ],
+  "ambiguidades": []
+}
+
+REGRA CRÍTICA: Se intent = "asking" ou "asking_delivery", SEMPRE retorne items: [] e ambiguidades: []
 `;
 
   try {
@@ -726,11 +1080,24 @@ JSON: {
     const content = response.choices[0]?.message?.content || '{}';
     const parsed = JSON.parse(content);
 
+    console.log(`🎯 IA detectou intenção para "${message}": ${parsed.intent}`);
+
     // Validar estrutura da resposta
     const result: ExtractionResult = {
+      intent: parsed.intent || 'ordering', // Default para ordering se não especificado
       items: Array.isArray(parsed.items) ? parsed.items : [],
       ambiguidades: Array.isArray(parsed.ambiguidades) ? parsed.ambiguidades : []
     };
+
+    // Se a intenção é perguntar, não processar produtos
+    if (result.intent === 'asking' || result.intent === 'asking_delivery') {
+      console.log(`❓ Cliente está PERGUNTANDO, não PEDINDO. Retornando listas vazias.`);
+      return {
+        intent: result.intent,
+        items: [],
+        ambiguidades: []
+      };
+    }
 
     // Adicionar IDs únicos para ambiguidades se não existirem
     result.ambiguidades = result.ambiguidades.map((amb: any) => ({
@@ -877,9 +1244,9 @@ Retorne APENAS o JSON, sem texto adicional.`;
  * Identifica tipo de entrega: se cliente informou ENDEREÇO (delivery) ou disse RETIRADA (counter)
  * Nova pergunta: "Informe seu endereço para entrega ou digite Retirada para retirar o pedido na loja"
  */
-export async function identifyDeliveryType(userResponse: string): Promise<{ 
-  type: 'delivery' | 'counter' | null; 
-  confidence: number; 
+export async function identifyDeliveryType(userResponse: string): Promise<{
+  type: 'delivery' | 'counter' | null;
+  confidence: number;
   extractedAddress?: string;
   parsedAddress?: {
     street?: string;

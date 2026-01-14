@@ -17,6 +17,7 @@ export type ConversationFlow =
   'CONTACT' |
   'EDIT_CART' |
   'ORDER_COMPLETED' |
+  'AWAITING_PAYMENT' |
   'COLLECT_CUSTOMER_NAME' |
   'EDIT_CART_ITEM' |
   'EDIT_CART_ACTION' |
@@ -70,7 +71,7 @@ export interface Conversation {
   previousScreen?: string; // Campo para armazenar o fluxo anterior
   productBeingAnswered?: string;
   selectedItemIndex?: number;
-  selectedAnswers: string[]; // Armazena as respostas selecionadas para perguntas de múltipla escolha
+  // selectedAnswers: string[]; // Armazena as respostas selecionadas para perguntas de múltipla escolha
   deliveryPrice?: number;
   customerName?: string; // Nome do cliente
   customerDocument?: string; // CPF do cliente
@@ -99,7 +100,11 @@ export interface Conversation {
     number?: string;
     neighborhood?: string;
     complement?: string;
-  } | null
+  } | null;
+  mercadoPagoPreferenceId?: string; // ID da preferência do Mercado Pago
+  mercadoPagoPaymentId?: string; // ID do pagamento do Mercado Pago
+  paymentLinkUrl?: string; // URL do link de pagamento
+  externalReference?: string; // Referência externa do pedido
 }
 
 export interface ResolvedItem {
@@ -134,6 +139,7 @@ export interface AmbiguityGroup {
 }
 
 export interface ExtractionResult {
+  intent?: 'ordering' | 'asking' | 'asking_delivery'; // Intenção da mensagem
   items: ResolvedItem[];
   ambiguidades: AmbiguityGroup[];
 }

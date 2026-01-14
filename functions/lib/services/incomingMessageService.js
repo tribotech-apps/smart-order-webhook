@@ -9,11 +9,13 @@ exports.classifyUserMessage = classifyUserMessage;
 exports.classifyPaymentType = classifyPaymentType;
 exports.interpretDeliveryChoice = interpretDeliveryChoice;
 exports.interpretAddressConfirmation = interpretAddressConfirmation;
-const ordersController_1 = require("../controllers/ordersController");
 const conversationController_1 = require("../controllers/conversationController");
 const messagingService_1 = require("./messagingService");
 const userController_1 = require("../controllers/userController");
 const storeController_1 = require("../controllers/storeController");
+const pendingOrderController_1 = require("../controllers/pendingOrderController");
+const mercadoPagoService_1 = require("./mercadoPagoService");
+const firestore_1 = require("firebase/firestore");
 const openai_1 = __importDefault(require("openai"));
 const google_maps_services_js_1 = require("@googlemaps/google-maps-services-js");
 const core_1 = require("firebase-functions/v2/core");
@@ -26,46 +28,149 @@ async function sendMessageAccessible(messageData, wabaEnvironments, enableAudio 
     return await (0, messagingService_2.sendMessageWithOptionalAudio)(messageData, wabaEnvironments, enableAudio);
 }
 // Função para formatar o cardápio de forma bonita
-function formatBeautifulMenu(products) {
+function formatBeautifulMenu(products, categories) {
     if (!products || products.length === 0) {
         return '📋 *Cardápio Vazio*\n\nDesculpe, não temos produtos disponíveis no momento.';
     }
     let beautifulMenu = '';
+    // Agrupar produtos por categoria
+    const productsByCategory = new Map();
+    const productsWithoutCategory = [];
     products.forEach((product) => {
-        // Ícone baseado na categoria/tipo do produto
-        let icon = '🍴';
-        const name = product.menuName.toLowerCase();
-        if (name.includes('pizza'))
-            icon = '🍕';
-        else if (name.includes('hambur') || name.includes('burger'))
-            icon = '🍔';
-        else if (name.includes('coca') || name.includes('refri') || name.includes('suco'))
-            icon = '🥤';
-        else if (name.includes('marmitex') || name.includes('marmita') || name.includes('prato'))
-            icon = '🍱';
-        else if (name.includes('sorvete') || name.includes('açaí'))
-            icon = '🍦';
-        else if (name.includes('lanche') || name.includes('sanduiche'))
-            icon = '🥪';
-        else if (name.includes('cerveja') || name.includes('bebida'))
-            icon = '🍺';
-        else if (name.includes('doce') || name.includes('sobremesa'))
-            icon = '🧁';
-        beautifulMenu += `${icon} *${product.menuName}*\n`;
-        beautifulMenu += `💰 R$ ${product.price.toFixed(2).replace('.', ',')}\n`;
-        if (product.menuDescription) {
-            beautifulMenu += `📝 ${product.menuDescription}\n`;
+        if (product.categoryId !== undefined && product.categoryId !== null) {
+            if (!productsByCategory.has(product.categoryId)) {
+                productsByCategory.set(product.categoryId, []);
+            }
+            productsByCategory.get(product.categoryId).push(product);
         }
-        // Mostrar opcionais disponíveis de forma resumida
-        if (product.questions && product.questions.length > 0) {
-            const optionalQuestions = product.questions.filter((q) => q.minAnswerRequired === 0);
-            const requiredQuestions = product.questions.filter((q) => q.minAnswerRequired > 0);
-            if (optionalQuestions.length > 0) {
-                beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q) => q.questionName.toLowerCase()).join(', ')}\n`;
+        else {
+            productsWithoutCategory.push(product);
+        }
+    });
+    // Ordenar categorias por ID
+    const sortedCategoryIds = Array.from(productsByCategory.keys()).sort((a, b) => a - b);
+    // Iterar por cada categoria
+    sortedCategoryIds.forEach((categoryId, index) => {
+        const categoryProducts = productsByCategory.get(categoryId);
+        // Buscar nome da categoria
+        let categoryName = 'Outros';
+        if (categories) {
+            const category = categories.find((cat) => cat.categoryId === categoryId);
+            if (category) {
+                categoryName = category.categoryName;
             }
         }
-        beautifulMenu += '\n━━━━━━━━━━━━━━━━━━━━\n\n';
+        // Adicionar header da categoria
+        beautifulMenu += `\n🏷️ *${categoryName.toUpperCase()}*\n`;
+        beautifulMenu += '\n━━━━━━━━━━━━━━━━━━━━\n';
+        // Adicionar produtos da categoria
+        categoryProducts.forEach((product) => {
+            // Ícone baseado na categoria/tipo do produto
+            let icon = '🍴';
+            const name = product.menuName.toLowerCase();
+            if (name.includes('pizza'))
+                icon = '🍕';
+            else if (name.includes('hambur') || name.includes('burger'))
+                icon = '🍔';
+            else if (name.includes('coca') || name.includes('refri') || name.includes('suco'))
+                icon = '🥤';
+            else if (name.includes('marmitex') || name.includes('marmita') || name.includes('prato'))
+                icon = '🍱';
+            else if (name.includes('sorvete') || name.includes('açaí'))
+                icon = '🍦';
+            else if (name.includes('lanche') || name.includes('sanduiche'))
+                icon = '🥪';
+            else if (name.includes('cerveja') || name.includes('bebida'))
+                icon = '🍺';
+            else if (name.includes('doce') || name.includes('sobremesa'))
+                icon = '🧁';
+            beautifulMenu += `${icon} *${product.menuName}*\n`;
+            // Se product.price === 0, mostrar preços das respostas da primeira pergunta
+            if (product.price === 0 && product.questions && product.questions.length > 0) {
+                const firstQuestion = product.questions[0];
+                if (firstQuestion.answers && firstQuestion.answers.length > 0) {
+                    // Mostrar as opções com seus preços
+                    firstQuestion.answers.forEach((answer) => {
+                        const answerPrice = answer.price || 0;
+                        beautifulMenu += `  • ${answer.answerName} - R$ ${answerPrice.toFixed(2).replace('.', ',')}\n`;
+                    });
+                }
+            }
+            else if (product.price > 0) {
+                // Mostrar preço base normal
+                beautifulMenu += `💰 R$ ${product.price.toFixed(2).replace('.', ',')}\n`;
+            }
+            if (product.menuDescription) {
+                beautifulMenu += `📝 ${product.menuDescription}\n`;
+            }
+            // Mostrar opcionais disponíveis de forma resumida (exceto a primeira pergunta se preço=0)
+            if (product.questions && product.questions.length > 0) {
+                const questionsToShow = product.price === 0
+                    ? product.questions.slice(1) // Pula primeira pergunta se preço=0
+                    : product.questions;
+                const optionalQuestions = questionsToShow.filter((q) => q.minAnswerRequired === 0);
+                if (optionalQuestions.length > 0) {
+                    beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q) => q.questionName.toLowerCase()).join(', ')}\n`;
+                }
+            }
+            beautifulMenu += '\n';
+        });
+        // Separador entre categorias (exceto última)
+        if (index < sortedCategoryIds.length - 1 || productsWithoutCategory.length > 0) {
+            beautifulMenu += '━━━━━━━━━━━━━━━━━━━━\n';
+        }
     });
+    // Adicionar produtos sem categoria no final
+    if (productsWithoutCategory.length > 0) {
+        beautifulMenu += `\n🏷️ *OUTROS*\n`;
+        beautifulMenu += '━━━━━━━━━━━━━━━━━━━━\n\n';
+        productsWithoutCategory.forEach((product) => {
+            let icon = '🍴';
+            const name = product.menuName.toLowerCase();
+            if (name.includes('pizza'))
+                icon = '🍕';
+            else if (name.includes('hambur') || name.includes('burger'))
+                icon = '🍔';
+            else if (name.includes('coca') || name.includes('refri') || name.includes('suco'))
+                icon = '🥤';
+            else if (name.includes('marmitex') || name.includes('marmita') || name.includes('prato'))
+                icon = '🍱';
+            else if (name.includes('sorvete') || name.includes('açaí'))
+                icon = '🍦';
+            else if (name.includes('lanche') || name.includes('sanduiche'))
+                icon = '🥪';
+            else if (name.includes('cerveja') || name.includes('bebida'))
+                icon = '🍺';
+            else if (name.includes('doce') || name.includes('sobremesa'))
+                icon = '🧁';
+            beautifulMenu += `${icon} *${product.menuName}*\n`;
+            if (product.price === 0 && product.questions && product.questions.length > 0) {
+                const firstQuestion = product.questions[0];
+                if (firstQuestion.answers && firstQuestion.answers.length > 0) {
+                    firstQuestion.answers.forEach((answer) => {
+                        const answerPrice = answer.price || 0;
+                        beautifulMenu += `  • ${answer.answerName} - R$ ${answerPrice.toFixed(2).replace('.', ',')}\n`;
+                    });
+                }
+            }
+            else if (product.price > 0) {
+                beautifulMenu += `💰 R$ ${product.price.toFixed(2).replace('.', ',')}\n`;
+            }
+            if (product.menuDescription) {
+                beautifulMenu += `📝 ${product.menuDescription}\n`;
+            }
+            if (product.questions && product.questions.length > 0) {
+                const questionsToShow = product.price === 0
+                    ? product.questions.slice(1)
+                    : product.questions;
+                const optionalQuestions = questionsToShow.filter((q) => q.minAnswerRequired === 0);
+                if (optionalQuestions.length > 0) {
+                    beautifulMenu += `➕ *Adicionais disponíveis:* ${optionalQuestions.map((q) => q.questionName.toLowerCase()).join(', ')}\n`;
+                }
+            }
+            beautifulMenu += '\n';
+        });
+    }
     return beautifulMenu;
 }
 // Initialize heavy dependencies using Firebase onInit
@@ -81,7 +186,9 @@ const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
 });
 // Função auxiliar para calcular preço total de um item incluindo respostas das perguntas
 function calculateItemTotalPrice(item) {
-    let totalPrice = item.price * item.quantity;
+    // Se o item tem preço, usar o preço base
+    let totalPrice = (item.price || 0) * item.quantity;
+    // Somar os preços das respostas selecionadas
     if (item.questions && Array.isArray(item.questions)) {
         item.questions.forEach((question) => {
             if (question.answers && Array.isArray(question.answers)) {
@@ -97,10 +204,30 @@ function calculateItemTotalPrice(item) {
 }
 // Função auxiliar para calcular preço de um item com selectedAnswers (formato da extração)
 function calculateItemPriceWithSelectedAnswers(item, menuData) {
-    let basePrice = item.price * item.quantity;
+    console.log('🔍 Calculando preço para:', {
+        itemMenuId: item.menuId,
+        itemMenuName: item.menuName,
+        itemQuantity: item.quantity,
+        totalMenuItems: menuData.length
+    });
+    // Buscar o produto no menu para ter acesso às perguntas
+    const menuItem = menuData.find((menuProduct) => menuProduct.menuId === item.menuId);
+    if (!menuItem) {
+        console.error('❌ Item não encontrado no menu:', {
+            searchingMenuId: item.menuId,
+            itemName: item.menuName,
+            availableMenuIds: menuData.map(m => ({ menuId: m.menuId, menuName: m.menuName }))
+        });
+        return 0;
+    }
+    console.log('✅ Item encontrado:', { menuName: menuItem.menuName, price: menuItem.price });
+    // Usar o preço do menuItem (do cardápio) ao invés do item.price que pode estar undefined
+    const itemPrice = menuItem.price || 0;
+    const itemQuantity = item.quantity || 1;
+    // Preço base do item
+    let basePrice = itemPrice * itemQuantity;
+    console.log('---BASE PRICE---', { itemPrice, itemQuantity, basePrice, hasSelectedAnswers: !!(item.selectedAnswers && Array.isArray(item.selectedAnswers)) });
     if (item.selectedAnswers && Array.isArray(item.selectedAnswers)) {
-        // Buscar o produto no menu para ter acesso às perguntas e preços
-        const menuItem = menuData.find((menuProduct) => menuProduct.menuId === item.menuId);
         if (menuItem && menuItem.questions) {
             item.selectedAnswers.forEach((selectedAnswer) => {
                 // Encontrar a pergunta correspondente
@@ -108,20 +235,23 @@ function calculateItemPriceWithSelectedAnswers(item, menuData) {
                 if (question && question.answers) {
                     // Encontrar a resposta correspondente
                     const originalAnswer = question.answers.find((a) => a.answerId === selectedAnswer.answerId);
+                    console.log('ORIGINAL ANSWER', originalAnswer);
                     if (originalAnswer && originalAnswer.price) {
                         const answerQuantity = selectedAnswer.quantity || 1;
-                        basePrice += originalAnswer.price * answerQuantity * item.quantity;
+                        basePrice += originalAnswer.price * answerQuantity * itemQuantity;
                     }
                 }
             });
         }
     }
+    console.log('---FINAL BASE PRICE RETURN---', basePrice);
     return basePrice;
 }
 // Função auxiliar para gerar descrição detalhada de um item incluindo TODAS as respostas selecionadas
 function generateItemDescription(item) {
     console.log('generateItemDescription', item);
-    let itemTotal = item.price * item.quantity;
+    // Preço base do item
+    let itemTotal = (item.price || 0) * item.quantity;
     // 🍽️ HEADER DO ITEM com espaçamento e visibilidade melhorada
     let description = `🍽️ *${item.quantity}x ${item.menuName.toUpperCase()}*`;
     // Lista de todas as respostas selecionadas (pagas e gratuitas)
@@ -137,7 +267,14 @@ function generateItemDescription(item) {
                         // Calcular total do adicional se tiver preço
                         if (answer.price && answer.price > 0) {
                             const answerTotal = answer.price * answer.quantity * item.quantity;
-                            selectedAnswers.push(`   • ${answer.quantity}x ${answer.answerName} (+R$ ${answerTotal.toFixed(2)})`);
+                            // Se o item tem preço 0, a resposta não é adicional, é o preço principal
+                            // Então mostra sem "+"
+                            if (item.price === 0) {
+                                selectedAnswers.push(`   • ${answer.quantity}x ${answer.answerName} (R$ ${answerTotal.toFixed(2)})`);
+                            }
+                            else {
+                                selectedAnswers.push(`   • ${answer.quantity}x ${answer.answerName} (+R$ ${answerTotal.toFixed(2)})`);
+                            }
                             itemTotal += answerTotal;
                         }
                         else {
@@ -160,6 +297,38 @@ function generateItemDescription(item) {
     // 💰 PREÇO em linha separada e destaque
     description += `\n\n💰 *VALOR: R$ ${itemTotal.toFixed(2)}*`;
     return description;
+}
+// Função auxiliar para formatar item de confirmação
+function formatConfirmationItem(item, menuData) {
+    const menuItem = menuData.find((m) => m.menuId === item.menuId);
+    const totalPrice = calculateItemPriceWithSelectedAnswers(item, menuData);
+    // Verificar se o preço é válido
+    if (isNaN(totalPrice)) {
+        console.error('❌ Preço NaN detectado para item:', item);
+        return `🔹 ${item.quantity}x ${item.menuName} - ⚠️ Erro no cálculo\n`;
+    }
+    let opcString = '';
+    if (item.selectedAnswers && item.selectedAnswers.length > 0) {
+        const opcionaisComPreco = [];
+        item.selectedAnswers.forEach((selectedAnswer) => {
+            const question = menuItem?.questions?.find((q) => q.questionId === selectedAnswer.questionId);
+            const originalAnswer = question?.answers?.find((a) => a.answerId === selectedAnswer.answerId);
+            // Se item.price === 0, preço vem das respostas (não mostrar +)
+            // Se item.price > 0, mostrar preço adicional com +
+            const itemBasePrice = menuItem?.price || 0;
+            const answerPrice = originalAnswer?.price && originalAnswer?.price > 0
+                ? (originalAnswer.price * (originalAnswer.quantity || 1)).toFixed(2)
+                : '';
+            let priceText = '';
+            if (answerPrice) {
+                priceText = itemBasePrice === 0 ? ` (R$ ${answerPrice})` : ` (+R$ ${answerPrice})`;
+            }
+            opcionaisComPreco.push((originalAnswer?.answerName || selectedAnswer.answerName || '') + priceText);
+        });
+        opcString = ` (${opcionaisComPreco.join(', ')})`;
+    }
+    const newPrice = totalPrice.toFixed(2);
+    return `🔹 ${item.quantity}x ${item.menuName}${opcString} ${totalPrice > 0 ? `- R$ ${newPrice}` : ''}\n`;
 }
 // Função auxiliar para processar próximo produto da fila
 async function processNextProductInQueue(conversation, store, from) {
@@ -233,13 +402,35 @@ async function processNextProductInQueue(conversation, store, from) {
     }
     // Check if extracted answers already satisfy question requirements
     const extractedAnswers = nextProduct.selectedAnswers || [];
+    console.log('🔍 DEBUG - Verificando respostas extraídas:', {
+        productName: nextProduct.menuName,
+        extractedAnswers: JSON.stringify(extractedAnswers, null, 2),
+        productQuestions: fullMenuItem.questions.map((q) => ({
+            questionId: q.questionId,
+            questionName: q.questionName,
+            minRequired: q.minAnswerRequired
+        }))
+    });
     const questionsNeedingAnswers = fullMenuItem.questions.filter((question) => {
         const currentQuestionAnswers = extractedAnswers.filter(answer => answer.questionId === question.questionId);
         const totalAnswerQuantity = currentQuestionAnswers.reduce((sum, answer) => sum + (answer.quantity || 1), 0);
+        console.log(`🔍 DEBUG - Pergunta "${question.questionName}":`, {
+            questionId: question.questionId,
+            minRequired: question.minAnswerRequired,
+            currentAnswers: currentQuestionAnswers,
+            totalQuantity: totalAnswerQuantity,
+            needsMore: totalAnswerQuantity < question.minAnswerRequired
+        });
         return totalAnswerQuantity < question.minAnswerRequired;
+    });
+    console.log(`🔍 DEBUG - Resultado da validação:`, {
+        questionsNeedingAnswers: questionsNeedingAnswers.length,
+        willAskQuestions: questionsNeedingAnswers.length > 0,
+        willAddDirectly: questionsNeedingAnswers.length === 0
     });
     // If all required answers are already provided by AI extraction
     if (questionsNeedingAnswers.length === 0) {
+        console.log('✅ DEBUG - Todas as respostas fornecidas! Adicionando ao carrinho diretamente.');
         // Build cart item with extracted answers - include only selected answers
         const structuredAnswers = fullMenuItem.questions.map((question) => {
             const questionAnswers = extractedAnswers.filter(answer => answer.questionId === question.questionId);
@@ -317,9 +508,64 @@ async function processNextProductInQueue(conversation, store, from) {
         await processNextProductInQueue({ ...conversation, cartItems, pendingProductsQueue: remainingQueue }, store, from);
         return;
     }
-    // Produto com perguntas - iniciar fluxo de customização
-    const firstQuestion = fullMenuItem.questions[0];
-    const optionsList = firstQuestion.answers?.map((answer) => `• ${answer.answerName}${answer.price > 0 ? ` (+R$ ${answer.price.toFixed(2)})` : ''}`).join('\n') || 'Opções não disponíveis';
+    // Produto com perguntas - iniciar fluxo de customização APENAS nas perguntas que faltam
+    // REGRA CRÍTICA: Pular perguntas que já foram respondidas pela IA
+    const firstQuestionNeedingAnswer = questionsNeedingAnswers[0];
+    const firstQuestionIndex = fullMenuItem.questions.findIndex((q) => q.questionId === firstQuestionNeedingAnswer.questionId);
+    console.log('🔍 DEBUG - Iniciando perguntas:', {
+        totalQuestions: fullMenuItem.questions.length,
+        questionsNeedingAnswers: questionsNeedingAnswers.length,
+        firstQuestionNeedingAnswer: firstQuestionNeedingAnswer.questionName,
+        startingAtIndex: firstQuestionIndex,
+        alreadyAnswered: extractedAnswers.length
+    });
+    // Construir estrutura de perguntas preservando respostas já extraídas
+    const structuredQuestionsWithExtracted = fullMenuItem.questions.map((question) => {
+        const questionAnswers = extractedAnswers.filter(answer => answer.questionId === question.questionId);
+        if (questionAnswers.length === 0) {
+            return null; // Pergunta sem respostas ainda
+        }
+        const selectedAnswersOnly = questionAnswers.map((selectedAnswer) => {
+            const originalAnswer = question.answers?.find((a) => a.answerId === selectedAnswer.answerId);
+            return {
+                answerId: selectedAnswer.answerId,
+                answerName: selectedAnswer.answerName,
+                quantity: selectedAnswer.quantity || 1,
+                price: originalAnswer?.price || 0
+            };
+        });
+        return {
+            ...question,
+            answers: selectedAnswersOnly
+        };
+    }).filter((question) => question !== null);
+    const optionsList = firstQuestionNeedingAnswer.answers?.map((answer) => `• ${answer.answerName}${answer.price > 0 ? ` (+R$ ${answer.price.toFixed(2)})` : ''}`).join('\n') || 'Opções não disponíveis';
+    // Verificar quais respostas já foram escolhidas para ESTA pergunta específica
+    const alreadySelectedForThisQuestion = extractedAnswers.filter(answer => answer.questionId === firstQuestionNeedingAnswer.questionId);
+    const totalAlreadySelected = alreadySelectedForThisQuestion.reduce((sum, answer) => sum + (answer.quantity || 1), 0);
+    const minRequired = firstQuestionNeedingAnswer.minAnswerRequired || 0;
+    const stillNeeded = Math.max(0, minRequired - totalAlreadySelected);
+    console.log('📊 DEBUG - Respostas já escolhidas:', {
+        questionName: firstQuestionNeedingAnswer.questionName,
+        alreadySelected: alreadySelectedForThisQuestion,
+        totalAlreadySelected,
+        minRequired,
+        stillNeeded
+    });
+    // Construir texto mostrando o que já foi escolhido
+    let alreadySelectedText = '';
+    if (alreadySelectedForThisQuestion.length > 0) {
+        const selectedList = alreadySelectedForThisQuestion.map(answer => {
+            const qty = answer.quantity || 1;
+            return `${qty > 1 ? qty + 'x ' : ''}${answer.answerName}`;
+        }).join(', ');
+        alreadySelectedText = `\n✅ *JÁ ESCOLHIDO:* ${selectedList}\n`;
+    }
+    // Texto indicando quantas opções ainda faltam
+    let remainingText = '';
+    if (stillNeeded > 0) {
+        remainingText = `\n🔢 *ESCOLHA MAIS ${stillNeeded}*\n`;
+    }
     await (0, conversationController_1.updateConversation)(conversation, {
         flow: 'PRODUCT_QUESTIONS',
         currentProcessingProduct: nextProduct,
@@ -333,16 +579,20 @@ async function processNextProductInQueue(conversation, store, from) {
             allDays: fullMenuItem.allDays || true,
             price: nextProduct.price,
             quantity: nextProduct.quantity,
-            questions: [],
-            selectedAnswers: nextProduct.selectedAnswers?.map((answer) => answer.answerName) || []
+            questions: structuredQuestionsWithExtracted, // Preservar respostas já extraídas
+            selectedAnswers: extractedAnswers.map((answer) => answer.answerName) || []
         },
-        currentQuestionIndex: 0
+        currentQuestionIndex: firstQuestionIndex // Começar na primeira pergunta que falta responder
+    });
+    console.log('✅ DEBUG - Perguntando apenas o que falta:', {
+        questionName: firstQuestionNeedingAnswer.questionName,
+        questionIndex: firstQuestionIndex
     });
     await (0, messagingService_1.sendMessage)({
         messaging_product: 'whatsapp',
         to: "+" + from,
         type: 'text',
-        text: { body: `🍽️ *PERSONALIZAR PRODUTO* 🍽️\n\n*${nextProduct.quantity}x ${nextProduct.menuName}*\n\n❓ *${firstQuestion.questionName.toUpperCase()}*\n\n${optionsList}\n\n👆 *ESCOLHA UMA OPÇÃO:*` }
+        text: { body: `🍽️ *PERSONALIZAR PRODUTO* 🍽️\n\n*${nextProduct.quantity}x ${nextProduct.menuName}*\n\n❓ *${firstQuestionNeedingAnswer.questionName.toUpperCase()}*${alreadySelectedText}${remainingText}\n${optionsList}\n\n👆 👆 👆 👆 👆 👆` }
     }, store.wabaEnvironments);
 }
 // Cache to store address details temporarily
@@ -502,7 +752,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     case "greeting":
                     case "other":
                     case "want_menu_or_start":
-                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []));
+                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []), store.categories);
                         // Enviar cardápio formatado para o cliente
                         if (store.wabaEnvironments) {
                             const menuMessage = '📱 *COMO FAZER SEU PEDIDO* 📱\n\n🗣️ INFORME O PRODUTO DESEJADO\n\n🎤 *PODE MANDAR MENSAGEM DE VOZ!*\n\n📝 *EXEMPLOS:*\n"Quero uma pizza margherita"\n"1 marmitex médio"\n\n👆 *DIGITE OU FALE AGORA:*';
@@ -510,7 +760,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                 messaging_product: 'whatsapp',
                                 to: "+" + from,
                                 type: 'text',
-                                text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}\n\n${menuMessage}` }
+                                text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n${beautifulMenu}\n${menuMessage}` }
                             }, store.wabaEnvironments);
                         }
                         return;
@@ -535,7 +785,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                     messaging_product: 'whatsapp',
                                     to: "+" + from,
                                     type: 'text',
-                                    text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${addressFound}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                                    text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${addressFound}\n\n❓ *ESTÁ CORRETO? VOCÊ CONFIRMA ESTE ENDEREÇO?*` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
                                 }, store.wabaEnvironments);
                                 await (0, conversationController_1.updateConversation)(currentConversation, {
                                     flow: 'ADDRESS_CONFIRMATION',
@@ -561,7 +811,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                     messaging_product: 'whatsapp',
                                     to: "+" + from,
                                     type: 'text',
-                                    text: { body: `✅ *ENDEREÇO ENCONTRADO* ✅\n\nEncontramos esse endereço do seu último pedido. \n\n📍 ${userFrom.address.name}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO PARA ENTREGA?*\n\n* SSe voce quiser buscar o pedido na loja, digite *RETIRADA*, ou informe um outro endereço para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
+                                    text: { body: `❓ *SEU PEDIDO É PARA ENTREGA?* ❓\n\nEncontramos esse endereço do seu último pedido. \n\n📍 *${userFrom.address.name}*\n\n❓ *ESTÁ CORRETO? VOCÊ CONFIRMA ESTE ENDEREÇO COMPLETO PARA ENTREGA?*\n\n👉 Se você quiser buscar o pedido na loja, digite *RETIRADA*, *ou informe um outro endereço* para entrega` } // 📝 *OU INFORME OUTRO ENDEREÇO:*
                                 }, store.wabaEnvironments);
                                 await (0, conversationController_1.updateConversation)(currentConversation, {
                                     flow: 'ADDRESS_CONFIRMATION',
@@ -581,7 +831,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+                            text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO COMPLETO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
                         }, store.wabaEnvironments, true);
                         break;
                     case "close_order":
@@ -607,7 +857,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
+                        text: { body: '🚚 *ENDEREÇO DE ENTREGA* 🚚\n\n📍 Por favor, informe seu *ENDEREÇO COMPLETO PARA ENTREGA*\n\nOU digite *RETIRADA* se quiser pegar seu pedido na loja' }
                     }, store.wabaEnvironments);
                     return;
                 }
@@ -650,27 +900,62 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             }
                         }
                         else if (extractedProducts.items && extractedProducts.items.length > 0) {
-                            const itensResolvidos = extractedProducts.items.map((item) => {
-                                const totalPrice = calculateItemPriceWithSelectedAnswers(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
-                                // Montar descrição dos opcionais com preços individuais
-                                let opcString = '';
-                                console.log('***************************************xxxxxx', item.selectedAnswers);
-                                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
-                                    const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
-                                    const opcionaisComPreco = [];
-                                    item.selectedAnswers.forEach((selectedAnswer) => {
-                                        const question = menuItem?.questions?.find((q) => q.questionId === selectedAnswer.questionId);
-                                        const originalAnswer = question?.answers?.find((a) => a.answerId === selectedAnswer.answerId);
-                                        opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''));
-                                    });
-                                    opcString = ` (${opcionaisComPreco.join(', ')})`;
+                            console.log('📦 EXTRACTED PRODUCTS:', JSON.stringify(extractedProducts, null, 2));
+                            // Validar se todos os items têm menuId
+                            const itemsWithoutMenuId = extractedProducts.items.filter((item) => !item.menuId);
+                            if (itemsWithoutMenuId.length > 0) {
+                                console.error('❌ Items sem menuId:', itemsWithoutMenuId);
+                            }
+                            // Validar items com price=0 mas sem selectedAnswers
+                            const itemsNeedingQuestions = [];
+                            const validItems = [];
+                            extractedProducts.items.forEach((item) => {
+                                const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
+                                if (menuItem && menuItem.price === 0 && menuItem.questions && menuItem.questions.length > 0) {
+                                    // Item com price=0 - precisa ter selectedAnswers
+                                    const firstQuestion = menuItem.questions[0];
+                                    const hasAnswerForQuestion = item.selectedAnswers?.some((sa) => sa.questionId === firstQuestion.questionId);
+                                    if (!hasAnswerForQuestion) {
+                                        // Falta resposta obrigatória
+                                        console.warn('⚠️ Item com price=0 precisa de resposta:', item.menuName);
+                                        itemsNeedingQuestions.push(item);
+                                    }
+                                    else {
+                                        validItems.push(item);
+                                    }
                                 }
-                                return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+                                else {
+                                    // Item com preço normal - pode confirmar
+                                    validItems.push(item);
+                                }
+                            });
+                            // Se todos os items precisam de perguntas, mostrar erro
+                            if (itemsNeedingQuestions.length > 0 && validItems.length === 0) {
+                                const firstItem = itemsNeedingQuestions[0];
+                                const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === firstItem.menuId);
+                                const firstQuestion = menuItem?.questions?.[0];
+                                if (firstQuestion && firstQuestion.answers) {
+                                    const optionsText = firstQuestion.answers.map((answer) => `  👉 ${answer.answerName} - R$ ${(answer.price || 0).toFixed(2)}`).join('\n');
+                                    await (0, messagingService_1.sendMessage)({
+                                        messaging_product: 'whatsapp',
+                                        to: "+" + from,
+                                        type: 'text',
+                                        text: { body: `🔍 *ESCOLHA UMA OPÇÃO* 🔍\n\n📝 VOCÊ PEDIU:\n*${firstItem.quantity}x ${firstItem.menuName}*\n\n❓ *${firstQuestion.questionName}*\n\n${optionsText}\n\n💬 *Por favor, informe qual opção deseja.*` }
+                                    }, store.wabaEnvironments);
+                                    await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                                    return;
+                                }
+                            }
+                            // Se tem mix de items válidos e items com problemas, processar apenas os válidos
+                            const itemsToConfirm = validItems.length > 0 ? validItems : extractedProducts.items;
+                            const itensResolvidos = itemsToConfirm.map((item) => {
+                                console.log('🔧 Formatando item:', { menuId: item.menuId, menuName: item.menuName, quantity: item.quantity });
+                                return formatConfirmationItem(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
                             }).join('\n');
                             await (0, conversationController_1.updateConversation)(currentConversation, {
                                 flow: 'ORDER_REFINMENT_CONFIRMATION',
                                 refinmentItems: {
-                                    items: extractedProducts.items, // Preserva selectedAnswers de todos os items
+                                    items: itemsToConfirm, // Apenas items validados
                                     ambiguidades: extractedProducts.ambiguidades || []
                                 }
                             });
@@ -678,7 +963,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                 messaging_product: 'whatsapp',
                                 to: "+" + from,
                                 type: 'text',
-                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n📋 SEU PEDIDO:\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?` }
+                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n📋 SEU PEDIDO:\n\n${itensResolvidos}\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?` }
                             }, store.wabaEnvironments);
                         }
                         else {
@@ -706,7 +991,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${addressFound}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
+                            text: { body: `✅ *PEDIDO PARA ENTREGA* ✅\n\n📍 ${addressFound}\n\n❓ *ESTÁ CORRETO? VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: 'ADDRESS_CONFIRMATION',
@@ -777,7 +1062,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     messaging_product: 'whatsapp',
                     to: "+" + from,
                     type: 'text',
-                    text: { body: `📍 *CONFIRMAR ENDEREÇO COMPLETO* 📍\n\n🏠 *ENDEREÇO:*\n${fullAddress}\n\n❓ *VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
+                    text: { body: `📍 *CONFIRMAR ENDEREÇO COMPLETO* 📍\n\n🏠 *ENDEREÇO:*\n${fullAddress}\n\n❓ *ESTÁ CORRETO? VOCÊ CONFIRMA ESTE ENDEREÇO?*` }
                 }, store.wabaEnvironments);
                 await (0, conversationController_1.updateConversation)(currentConversation, {
                     flow: 'ADDRESS_CONFIRMATION',
@@ -802,7 +1087,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: '🏘️ *FALTA O BAIRRO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
+                            text: { body: '🏘️ *NÃO CONSEGUI IDENTIFICAR O BAIRRO* 🏘️\n\n📍 Por favor, informe o *BAIRRO* do seu endereço\n\n📝 *EXEMPLO:*\nJardim Ontário' }
                         }, store.wabaEnvironments);
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: 'NEIGHBORHOOD_DETECTION'
@@ -877,22 +1162,10 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             }
                         }
                         else if (extractedProducts.items && extractedProducts.items.length > 0) {
+                            console.log('📦 EXTRACTED PRODUCTS [Flow 2/3]:', JSON.stringify(extractedProducts, null, 2));
                             const itensResolvidos = extractedProducts.items.map((item) => {
-                                const totalPrice = calculateItemPriceWithSelectedAnswers(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
-                                // Montar descrição dos opcionais com preços individuais
-                                let opcString = '';
-                                // console.log('**************************xxxxxx', item.selectedAnswers)
-                                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
-                                    const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
-                                    const opcionaisComPreco = [];
-                                    item.selectedAnswers.forEach((selectedAnswer) => {
-                                        const question = menuItem?.questions?.find((q) => q.questionId === selectedAnswer.questionId);
-                                        const originalAnswer = question?.answers?.find((a) => a.answerId === selectedAnswer.answerId);
-                                        opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''));
-                                    });
-                                    opcString = ` (${opcionaisComPreco.join(', ')})`;
-                                }
-                                return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+                                console.log('🔧 Formatando item [Flow 2/3]:', { menuId: item.menuId, menuName: item.menuName, quantity: item.quantity });
+                                return formatConfirmationItem(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
                             }).join('\n');
                             await (0, conversationController_1.updateConversation)(currentConversation, {
                                 flow: 'ORDER_REFINMENT_CONFIRMATION',
@@ -902,7 +1175,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                 messaging_product: 'whatsapp',
                                 to: "+" + from,
                                 type: 'text',
-                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
                             }, store.wabaEnvironments);
                         }
                         else {
@@ -918,7 +1191,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     else {
                         await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
                         // Cliente já tem endereço confirmado pelo sistema
-                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []));
+                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []), store.categories);
                         // Atualizar histórico da conversa
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             // flow: 'CATEGORIES',
@@ -998,21 +1271,10 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             }
                         }
                         else if (extractedProducts.items && extractedProducts.items.length > 0) {
+                            console.log('📦 EXTRACTED PRODUCTS [Flow 2/3]:', JSON.stringify(extractedProducts, null, 2));
                             const itensResolvidos = extractedProducts.items.map((item) => {
-                                const totalPrice = calculateItemPriceWithSelectedAnswers(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
-                                // Montar descrição dos opcionais com preços individuais
-                                let opcString = '';
-                                if (item.selectedAnswers && item.selectedAnswers.length > 0) {
-                                    const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
-                                    const opcionaisComPreco = [];
-                                    item.selectedAnswers.forEach((selectedAnswer) => {
-                                        const question = menuItem?.questions?.find((q) => q.questionId === selectedAnswer.questionId);
-                                        const originalAnswer = question?.answers?.find((a) => a.answerId === selectedAnswer.answerId);
-                                        opcionaisComPreco.push(originalAnswer?.answerName || '' + (originalAnswer?.price && originalAnswer?.price > 0 ? `(+ ${(originalAnswer?.price * (originalAnswer?.quantity || 1)).toFixed(2)})` : ''));
-                                    });
-                                    opcString = ` (${opcionaisComPreco.join(', ')})`;
-                                }
-                                return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+                                console.log('🔧 Formatando item [Flow 2/3]:', { menuId: item.menuId, menuName: item.menuName, quantity: item.quantity });
+                                return formatConfirmationItem(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
                             }).join('\n');
                             await (0, conversationController_1.updateConversation)(currentConversation, {
                                 flow: 'ORDER_REFINMENT_CONFIRMATION',
@@ -1022,7 +1284,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                                 messaging_product: 'whatsapp',
                                 to: "+" + from,
                                 type: 'text',
-                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+                                text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
                             }, store.wabaEnvironments);
                         }
                         else {
@@ -1038,7 +1300,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     else {
                         await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
                         // Cliente já definiu retirada - enviar cardápio
-                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []));
+                        const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []), store.categories);
                         // Atualizar histórico da conversa
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             history: `${currentConversation.history ? currentConversation.history + ' --- ' : ''} Cliente mudou para retirada na loja, cardápio enviado`
@@ -1098,7 +1360,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 const customerIntent = await (0, messageHelper_1.classifyCustomerIntent)(message.text.body, currentConversation.cartItems?.map(item => ({ menuId: item.menuId, menuName: item.menuName, quantity: item.quantity })));
                 console.log('Customer intent with existing cart:', customerIntent);
                 if (customerIntent.intent === 'want_menu_or_start') {
-                    const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []));
+                    const beautifulMenu = formatBeautifulMenu((0, orderService_1.filterMenuByWeekday)(store.menu || []), store.categories);
                     // Enviar cardápio formatado para o cliente
                     if (store.wabaEnvironments) {
                         const menuMessage = '📱 *COMO FAZER SEU PEDIDO* 📱\n\n🗣️ INFORME O PRODUTO DESEJADO\n\n🎤 *PODE MANDAR MENSAGEM DE VOZ!*\n\n📝 *EXEMPLOS:*\n"Quero uma pizza margherita"\n"1 marmitex médio"\n\n👆 *DIGITE OU FALE AGORA:*';
@@ -1106,7 +1368,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}\n\n${menuMessage}` }
+                            text: { body: `📋 *NOSSO CARDÁPIO* 📋\n\n🍽️ C O N F I R A   N O S S A S   O P Ç Õ E S:\n\n${beautifulMenu}\n${menuMessage}` }
                         }, store.wabaEnvironments);
                     }
                     return;
@@ -1128,6 +1390,94 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             type: 'text',
                             text: { body: finalMessage }
                         }, store.wabaEnvironments);
+                        return;
+                    }
+                    if (customerIntent.intent === 'replace_product') {
+                        console.log('🔄 Detectado: replace_product', customerIntent);
+                        // Extrair produto antigo e produto novo
+                        const productToChange = customerIntent.details?.productToChange;
+                        const newProduct = customerIntent.details?.newProduct;
+                        if (!productToChange || !newProduct) {
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: '❓ Não entendi qual produto você quer trocar. Por favor, informe qual produto remover e qual adicionar.\n\nExemplo: "quero trocar a pizza brotinho pela grande"' }
+                            }, store.wabaEnvironments);
+                            return;
+                        }
+                        // Buscar o produto antigo no carrinho usando busca fuzzy
+                        let updatedCartItems = [...(currentConversation.cartItems || [])];
+                        const productToChangeNormalized = productToChange.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        const cartItemIndex = updatedCartItems.findIndex(cartItem => {
+                            const itemNameNormalized = cartItem.menuName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                            return itemNameNormalized.includes(productToChangeNormalized) || productToChangeNormalized.includes(itemNameNormalized);
+                        });
+                        if (cartItemIndex === -1) {
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `❌ Não encontrei "${productToChange}" no seu carrinho.\n\n🛒 *Seu carrinho atual:*\n${updatedCartItems.map(item => `🔹 ${item.quantity}x ${item.menuName}`).join('\n')}\n\nDeseja adicionar ou remover algum item?` }
+                            }, store.wabaEnvironments);
+                            return;
+                        }
+                        // Remover o produto antigo
+                        const oldItem = updatedCartItems[cartItemIndex];
+                        const oldQuantity = oldItem.quantity;
+                        updatedCartItems.splice(cartItemIndex, 1);
+                        console.log(`🔄 Removendo "${oldItem.menuName}" (${oldQuantity}x) do carrinho`);
+                        // Atualizar carrinho sem o item antigo
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            cartItems: updatedCartItems
+                        });
+                        // Extrair o novo produto usando IA
+                        console.log(`🔍 Buscando novo produto: "${newProduct}"`);
+                        const extractedProducts = await (0, messageHelper_1.extractProductsFromMessageWithAI)(`${oldQuantity}x ${newProduct}`, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                        console.log('📦 Novo produto extraído:', extractedProducts);
+                        // Processar novo produto
+                        if (extractedProducts.items && extractedProducts.items.length > 0) {
+                            // Formatar itens para confirmação
+                            const itensResolvidos = extractedProducts.items.map((item) => {
+                                return formatConfirmationItem(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                            }).join('\n');
+                            // Salvar no refinmentItems e pedir confirmação
+                            await (0, conversationController_1.updateConversation)(currentConversation, {
+                                flow: 'ORDER_REFINMENT_CONFIRMATION',
+                                refinmentItems: extractedProducts
+                            });
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `✅ Ok! Removi "${oldItem.menuName}" do carrinho.\n\n🔄 *CONFIRME A TROCA* 🔄\n\n📋 NOVO ITEM:\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+                            }, store.wabaEnvironments);
+                        }
+                        else if (extractedProducts.ambiguidades && extractedProducts.ambiguidades.length > 0) {
+                            // Tem ambiguidades
+                            const firstAmbiguity = extractedProducts.ambiguidades[0];
+                            firstAmbiguity.refining = true;
+                            const itensAmbiguos = firstAmbiguity.items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
+                            await (0, conversationController_1.updateConversation)(currentConversation, {
+                                flow: 'ORDER_REFINMENT',
+                                refinmentItems: extractedProducts
+                            });
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `✅ Ok! Removi "${oldItem.menuName}" do carrinho.\n\n❓ Você mencionou "${firstAmbiguity.palavra}". Qual dessas opções você deseja?\n\n${itensAmbiguos}` }
+                            }, store.wabaEnvironments);
+                        }
+                        else {
+                            // Não encontrou o novo produto
+                            await (0, messagingService_1.sendMessage)({
+                                messaging_product: 'whatsapp',
+                                to: "+" + from,
+                                type: 'text',
+                                text: { body: `❌ Não encontrei "${newProduct}" no cardápio.\n\n⚠️ Removi "${oldItem.menuName}" do carrinho.\n\n📋 Por favor, informe um produto válido do nosso cardápio.` }
+                            }, store.wabaEnvironments);
+                        }
                         return;
                     }
                     if (customerIntent.intent === 'remove_product') {
@@ -1192,19 +1542,76 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 }
                 const extractedProducts = await (0, messageHelper_1.extractProductsFromMessageWithAI)(message.text.body || "", (0, orderService_1.filterMenuByWeekday)(store.menu));
                 console.log('**** EXTRACTED PRODUCTS ****: ', message.text.body, (0, orderService_1.filterMenuByWeekday)(store.menu).map(item => { return { menuId: item.menuId, menuName: item.menuName, price: item.price }; }), extractedProducts);
+                console.log('🔍🔍🔍 DEBUG DETALHADO - Resposta da IA:', {
+                    mensagemCliente: message.text.body,
+                    intent: extractedProducts.intent,
+                    itemsCount: extractedProducts.items?.length || 0,
+                    items: extractedProducts.items,
+                    ambiguidadesCount: extractedProducts.ambiguidades?.length || 0,
+                    ambiguidades: extractedProducts.ambiguidades,
+                    cardapioTotal: (0, orderService_1.filterMenuByWeekday)(store.menu).length,
+                    produtosComMarmitex: (0, orderService_1.filterMenuByWeekday)(store.menu).filter(p => p.menuName.toLowerCase().includes('marmitex')).map(p => ({ menuId: p.menuId, menuName: p.menuName }))
+                });
                 if (extractedProducts?.ambiguidades?.length) {
-                    const itensAmbiguos = extractedProducts.ambiguidades[0].items.map(item => `${item.menuName} - ${item.price}`).join('\n');
-                    if (itensAmbiguos?.length > 1) {
+                    // Formatar ambiguidades com mais detalhes (igual ao cardápio)
+                    const ambiguidade = extractedProducts.ambiguidades[0];
+                    const itensAmbiguosFormatados = ambiguidade.items.map((item) => {
+                        // Buscar produto completo no cardápio para pegar questions
+                        const fullProduct = (0, orderService_1.filterMenuByWeekday)(store.menu).find((p) => p.menuId === item.menuId);
+                        // Ícone baseado no tipo
+                        let icon = '🍴';
+                        const name = item.menuName.toLowerCase();
+                        if (name.includes('pizza'))
+                            icon = '🍕';
+                        else if (name.includes('hambur') || name.includes('burger'))
+                            icon = '🍔';
+                        else if (name.includes('coca') || name.includes('refri') || name.includes('suco'))
+                            icon = '🥤';
+                        else if (name.includes('marmitex') || name.includes('marmita') || name.includes('prato'))
+                            icon = '🍱';
+                        else if (name.includes('sorvete') || name.includes('açaí'))
+                            icon = '🍦';
+                        else if (name.includes('lanche') || name.includes('sanduiche'))
+                            icon = '🥪';
+                        let itemText = `${icon} *${item.menuName}*\n`;
+                        // Mostrar preço ou opções de preço
+                        if (item.price === 0 && fullProduct?.questions && fullProduct.questions.length > 0) {
+                            const firstQuestion = fullProduct.questions[0];
+                            if (firstQuestion.answers && firstQuestion.answers.length > 0) {
+                                itemText += `   Tamanhos:\n`;
+                                firstQuestion.answers.forEach((answer) => {
+                                    const answerPrice = answer.price || 0;
+                                    itemText += `   • ${answer.answerName} - R$ ${answerPrice.toFixed(2).replace('.', ',')}\n`;
+                                });
+                            }
+                        }
+                        else if (item.price > 0) {
+                            itemText += `   💰 R$ ${item.price.toFixed(2).replace('.', ',')}\n`;
+                        }
+                        // Mostrar opcionais disponíveis
+                        if (fullProduct?.questions && fullProduct.questions.length > 0) {
+                            const questionsToShow = item.price === 0
+                                ? fullProduct.questions.slice(1)
+                                : fullProduct.questions;
+                            const optionalQuestions = questionsToShow.filter((q) => q.minAnswerRequired === 0);
+                            if (optionalQuestions.length > 0) {
+                                itemText += `   ➕ *Opcionais:* ${optionalQuestions.map((q) => q.questionName.toLowerCase()).join(', ')}\n`;
+                            }
+                        }
+                        return itemText;
+                    }).join('\n━━━━━━━━━━━━━━━━━━━━\n\n');
+                    if (itensAmbiguosFormatados?.length > 1) {
                         extractedProducts.ambiguidades[0].refining = true;
                         await (0, conversationController_1.updateConversation)(currentConversation, {
                             flow: `ORDER_REFINMENT`,
                             refinmentItems: extractedProducts,
                         });
+                        const quantidadeTexto = ambiguidade.quantity > 1 ? `${ambiguidade.quantity}x ` : '';
                         await (0, messagingService_1.sendMessage)({
                             messaging_product: 'whatsapp',
                             to: "+" + from,
                             type: 'text',
-                            text: { body: `✅ Você pediu ${extractedProducts.ambiguidades[0].quantity} ${extractedProducts.ambiguidades[0].palavra}, qual das opções você deseja?\n\n${itensAmbiguos}` }
+                            text: { body: `❓ *QUAL OPÇÃO VOCÊ DESEJA?* ❓\n\nVocê pediu ${quantidadeTexto}"${ambiguidade.palavra}". Encontrei estas opções:\n\n━━━━━━━━━━━━━━━━━━━━\n\n${itensAmbiguosFormatados}\n━━━━━━━━━━━━━━━━━━━━\n\n👆 *Digite o nome do produto que deseja*` }
                         }, store.wabaEnvironments);
                     }
                     else {
@@ -1223,7 +1630,13 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         const totalPrice = calculateItemPriceWithSelectedAnswers(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
                         // Montar descrição dos opcionais com preços individuais
                         let opcString = '';
-                        console.log('***********************************xxxxxx', item.selectedAnswers);
+                        console.log('🔍 DEBUG [PONTO 1] - Item sendo salvo em refinmentItems:', {
+                            menuId: item.menuId,
+                            menuName: item.menuName,
+                            quantity: item.quantity,
+                            price: item.price,
+                            selectedAnswers: JSON.stringify(item.selectedAnswers, null, 2)
+                        });
                         if (item.selectedAnswers && item.selectedAnswers.length > 0) {
                             const menuItem = (0, orderService_1.filterMenuByWeekday)(store.menu).find((m) => m.menuId === item.menuId);
                             const opcionaisComPreco = [];
@@ -1234,8 +1647,15 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                             });
                             opcString = ` (${opcionaisComPreco.join(', ')})`;
                         }
-                        return `🔹 ${item.quantity}x ${item.menuName}${opcString} - R$ ${totalPrice.toFixed(2)}\n`;
+                        return `🔹 ${item.quantity}x ${item.menuName}${opcString} ${totalPrice > 0 ? `- R$ ${totalPrice.toFixed(2)}` : ''}\n`;
                     }).join('\n');
+                    console.log('🔍 DEBUG [PONTO 2] - Salvando em refinmentItems:', {
+                        items: extractedProducts.items.map((item) => ({
+                            menuId: item.menuId,
+                            menuName: item.menuName,
+                            selectedAnswers: item.selectedAnswers
+                        }))
+                    });
                     await (0, conversationController_1.updateConversation)(currentConversation, {
                         flow: `ORDER_REFINMENT_CONFIRMATION`,
                         refinmentItems: extractedProducts
@@ -1244,18 +1664,59 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: `Confirmando seu pedido:\n\n${itensResolvidos}\n\nEsta correto? Posso adicionar ao seu carrinho?` }
+                        text: { body: `✅ *CONFIRMAÇÃO DO PEDIDO* ✅\n\n${itensResolvidos}\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
                     }, store.wabaEnvironments);
                 }
                 else {
-                    // Não encontrou produtos
-                    await (0, messagingService_1.sendMessage)({
-                        messaging_product: 'whatsapp',
-                        to: "+" + from,
-                        type: 'text',
-                        text: { body: `✅ *Não consegui identificar o produto informado, por favor, informe um ou mais produtos do cardápio` }
-                    }, store.wabaEnvironments);
-                    await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                    // Não encontrou produtos - pode ser que a IA interpretou como "asking" ou realmente não encontrou
+                    console.log('❌ IA não retornou produtos. Verificando se é problema de intent...');
+                    // Tentar busca direta no cardápio como fallback
+                    const mensagemNormalizada = (message.text.body || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const palavrasChave = mensagemNormalizada.split(/\s+/).filter((p) => p.length > 2);
+                    console.log('🔍 Buscando produtos manualmente:', { mensagemNormalizada, palavrasChave });
+                    const produtosSimilares = (0, orderService_1.filterMenuByWeekday)(store.menu).filter((produto) => {
+                        const nomeProdutoNormalizado = produto.menuName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        return palavrasChave.some((palavra) => nomeProdutoNormalizado.includes(palavra));
+                    });
+                    console.log('📦 Produtos encontrados manualmente:', produtosSimilares.map((p) => ({ menuId: p.menuId, menuName: p.menuName })));
+                    if (produtosSimilares.length > 0) {
+                        // Encontrou produtos manualmente - criar ambiguidade manual
+                        const ambiguidade = {
+                            id: `manual_${Date.now()}`,
+                            palavra: palavrasChave[0] || 'produto',
+                            quantity: 1,
+                            refining: true,
+                            items: produtosSimilares.map((p) => ({
+                                menuId: p.menuId,
+                                menuName: p.menuName,
+                                price: p.price
+                            }))
+                        };
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            flow: 'ORDER_REFINMENT',
+                            refinmentItems: {
+                                items: [],
+                                ambiguidades: [ambiguidade]
+                            }
+                        });
+                        const itensAmbiguos = ambiguidade.items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: `✅ Encontrei estas opções de "${ambiguidade.palavra}":\n\n${itensAmbiguos}\n\n❓ Qual você deseja?` }
+                        }, store.wabaEnvironments);
+                    }
+                    else {
+                        // Realmente não encontrou nada
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: `❌ Não consegui identificar o produto informado.\n\n📋 Por favor, informe um produto do nosso cardápio ou digite "CARDÁPIO" para ver todas as opções.` }
+                        }, store.wabaEnvironments);
+                        await (0, conversationController_1.updateConversation)(currentConversation, { flow: 'CATEGORIES' });
+                    }
                 }
                 return;
             }
@@ -1278,44 +1739,46 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     price: item.price
                 })), currentRefinment.quantity || 1);
                 if (multipleProductsFromMessage && multipleProductsFromMessage.answers.length > 0) {
-                    // Cliente escolheu produtos específicos - converter para formato esperado
-                    const resolvedItems = multipleProductsFromMessage.answers.map(answer => {
-                        const productDb = (0, orderService_1.filterMenuByWeekday)(store.menu).find(item => item.menuId === answer.answerId);
-                        if (!productDb) {
-                            console.error('PRODUTO NÃO ENCONTRADO:', answer.answerId);
-                            return null;
-                        }
-                        return {
-                            menuId: productDb.menuId,
-                            menuName: productDb.menuName,
-                            quantity: answer.quantity,
-                            palavra: currentRefinment.palavra, // usar a palavra original da ambiguidade
-                            price: productDb.price
-                        };
-                    }).filter(item => item !== null);
-                    if (resolvedItems.length === 0) {
+                    // Cliente escolheu produtos específicos - extrair com a IA para capturar opcionais
+                    console.log('✅ Cliente escolheu da ambiguidade:', multipleProductsFromMessage);
+                    // Tentar extrair opcionais da mensagem do cliente
+                    const extractedWithOptionals = await (0, messageHelper_1.extractProductsFromMessageWithAI)(message.text.body || "", (0, orderService_1.filterMenuByWeekday)(store.menu));
+                    console.log('📦 Produtos extraídos com opcionais:', extractedWithOptionals);
+                    // Usar os produtos extraídos se tiver, senão usar os da seleção
+                    let itemsToAdd = extractedWithOptionals.items && extractedWithOptionals.items.length > 0
+                        ? extractedWithOptionals.items
+                        : multipleProductsFromMessage.answers.map(answer => {
+                            const productDb = (0, orderService_1.filterMenuByWeekday)(store.menu).find(item => item.menuId === answer.answerId);
+                            if (!productDb) {
+                                console.error('PRODUTO NÃO ENCONTRADO:', answer.answerId);
+                                return null;
+                            }
+                            return {
+                                menuId: productDb.menuId,
+                                menuName: productDb.menuName,
+                                quantity: answer.quantity,
+                                palavra: currentRefinment.palavra,
+                                price: productDb.price,
+                                selectedAnswers: []
+                            };
+                        }).filter(item => item !== null);
+                    if (itemsToAdd.length === 0) {
                         console.error('NENHUM PRODUTO VÁLIDO ENCONTRADO');
                         return;
                     }
-                    // Preservar itens já resolvidos e adicionar os novos
-                    const existingItems = currentConversation.refinmentItems?.items || [];
-                    const allItems = [...existingItems, ...resolvedItems];
+                    console.log('🔹 Itens que serão adicionados à fila:', itemsToAdd);
+                    // SIMPLIFICAÇÃO: Adicionar direto na fila de processamento
+                    // Não pedir confirmação novamente, já resolvemos a ambiguidade
+                    const currentQueue = currentConversation.pendingProductsQueue || [];
+                    const newQueue = [...currentQueue, ...itemsToAdd];
                     await (0, conversationController_1.updateConversation)(currentConversation, {
-                        flow: `ORDER_REFINMENT_CONFIRMATION`,
-                        refinmentItems: {
-                            items: allItems,
-                            ambiguidades: [] // Limpar apenas as ambiguidades processadas
-                        }
+                        flow: 'CATEGORIES',
+                        pendingProductsQueue: newQueue,
+                        refinmentItems: undefined // Limpar refinamento
                     });
-                    // Criar texto de confirmação para TODOS os produtos (existentes + novos)
-                    const confirmationText = allItems.map(item => `🔹 ${item.quantity}x ${item.menuName} - R$ ${(item.price * item.quantity).toFixed(2)}\n`).join('\n');
-                    const totalPrice = allItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-                    await (0, messagingService_1.sendMessage)({
-                        messaging_product: 'whatsapp',
-                        to: "+" + from,
-                        type: 'text',
-                        text: { body: `Você confirma a inclusão destes produtos no pedido?\n\n${confirmationText}\n\nTotal: R$ ${totalPrice.toFixed(2)}` }
-                    }, store.wabaEnvironments);
+                    console.log('📋 Processando produtos da fila...');
+                    // Processar primeiro produto da fila
+                    await processNextProductInQueue(currentConversation, store, from);
                 }
                 else {
                     // Não reconheceu a resposta
@@ -1345,13 +1808,30 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 }
                 // Verificar se cliente confirmou, rejeitou ou fez novo pedido
                 const confirmationResult = await (0, messageHelper_1.interpretOrderConfirmation)(message?.text?.body || '');
-                console.log('¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨¨', confirmationResult);
+                console.log('========== CONFIRMATION RESULT ==========', {
+                    type: confirmationResult.type,
+                    response: confirmationResult.response,
+                    newOrderText: confirmationResult.newOrderText,
+                    originalMessage: message?.text?.body
+                });
                 if (confirmationResult.type === 'CONFIRMED' || confirmationResult.type === 'CONFIRMED_WITH_ADDITION') {
                     // Cliente confirmou - criar fila de produtos para processar
+                    console.log(`✅ ✅ ✅ ENTROU NO BLOCO CONFIRMED ✅ ✅ ✅`);
                     const cartItems = currentConversation.cartItems || [];
                     // Coletar TODOS os produtos confirmados (podem ser múltiplos)
                     const allConfirmedItems = currentConversation.refinmentItems?.items || [itemParaConfirmar];
                     const remainingAmbiguities = currentConversation.refinmentItems?.ambiguidades?.filter(amb => !amb.refining) || [];
+                    console.log('🔍 DEBUG [PONTO 3] - Cliente confirmou! Itens em refinmentItems:', {
+                        itemsCount: allConfirmedItems.length,
+                        items: allConfirmedItems.map((item) => ({
+                            menuId: item.menuId,
+                            menuName: item.menuName,
+                            quantity: item.quantity,
+                            hasSelectedAnswers: !!item.selectedAnswers,
+                            selectedAnswersCount: item.selectedAnswers?.length || 0,
+                            selectedAnswers: item.selectedAnswers
+                        }))
+                    });
                     // Criar fila de produtos que precisam ser processados
                     const productsQueue = [...allConfirmedItems];
                     // Limpar refinement items já que vamos processar tudo na fila
@@ -1383,8 +1863,73 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         }
                     }
                 }
+                else if (confirmationResult.type === 'NEW_ORDER' && confirmationResult.newOrderText) {
+                    // Cliente REJEITOU o item E fez um NOVO PEDIDO na mesma mensagem
+                    console.log(`🔄 🔄 🔄 ENTROU NO BLOCO NEW_ORDER 🔄 🔄 🔄`);
+                    console.log(`🔄 Cliente rejeitou "${itemParaConfirmar.menuName}" e fez novo pedido: "${confirmationResult.newOrderText}"`);
+                    // Extrair produtos do novo pedido
+                    const newOrderProducts = await (0, messageHelper_1.extractProductsFromMessageWithAI)(confirmationResult.newOrderText, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                    console.log('📦 Novos produtos extraídos:', JSON.stringify(newOrderProducts, null, 2));
+                    // Verificar se há produtos ou ambiguidades
+                    if (newOrderProducts.items && newOrderProducts.items.length > 0) {
+                        // Tem produtos claros - PEDIR CONFIRMAÇÃO antes de adicionar
+                        console.log('📋 Formatando itens para confirmação...');
+                        // Formatar itens para confirmação
+                        const itensResolvidos = newOrderProducts.items.map((item) => {
+                            console.log('🔧 Formatando item do novo pedido:', { menuId: item.menuId, menuName: item.menuName, quantity: item.quantity });
+                            return formatConfirmationItem(item, (0, orderService_1.filterMenuByWeekday)(store.menu));
+                        }).join('\n');
+                        // Salvar no refinmentItems e mudar para flow de confirmação
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            flow: 'ORDER_REFINMENT_CONFIRMATION',
+                            refinmentItems: newOrderProducts, // Novos produtos extraídos
+                            pendingProductsQueue: currentConversation.pendingProductsQueue || [] // Preservar fila existente
+                        });
+                        // Enviar mensagem de confirmação
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: `✅ Ok! Não vou adicionar "${itemParaConfirmar.menuName}".\n\n✅ *CONFIRMAÇÃO DO NOVO PEDIDO* ✅\n\n📋 SEU PEDIDO:\n\n${itensResolvidos}\n\n❓ *ESTÁ CORRETO? POSSO ADICIONAR AO CARRINHO?*` }
+                        }, store.wabaEnvironments);
+                        return;
+                    }
+                    else if (newOrderProducts.ambiguidades && newOrderProducts.ambiguidades.length > 0) {
+                        // Tem ambiguidades no novo pedido - mostrar opções
+                        const firstAmbiguity = newOrderProducts.ambiguidades[0];
+                        firstAmbiguity.refining = true;
+                        const itensAmbiguos = firstAmbiguity.items.map(item => `${item.menuName} - R$ ${item.price.toFixed(2)}`).join('\n');
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            flow: 'ORDER_REFINMENT',
+                            refinmentItems: newOrderProducts
+                        });
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: `✅ Ok, não vou adicionar "${itemParaConfirmar.menuName}".\n\n❓ Você mencionou "${firstAmbiguity.palavra}". Qual dessas opções você deseja?\n\n${itensAmbiguos}` }
+                        }, store.wabaEnvironments);
+                        return;
+                    }
+                    else {
+                        // Não conseguiu extrair nada - pedir esclarecimento
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: `❌ Não consegui identificar o produto "${confirmationResult.newOrderText}".\n\n📋 Por favor, informe um produto do nosso cardápio.` }
+                        }, store.wabaEnvironments);
+                        await (0, conversationController_1.updateConversation)(currentConversation, {
+                            flow: 'CATEGORIES',
+                            refinmentItems: undefined
+                        });
+                        return;
+                    }
+                }
                 else {
-                    // Cliente não confirmou - verificar se há mais ambiguidades pendentes
+                    // Cliente simplesmente REJEITOU (sem novo pedido) - verificar ambiguidades pendentes
+                    console.log(`❌ ❌ ❌ ENTROU NO BLOCO REJECTED (sem novo pedido) ❌ ❌ ❌`);
+                    console.log(`Tipo detectado: ${confirmationResult.type}, newOrderText: ${confirmationResult.newOrderText}`);
                     const remainingAmbiguidades = currentConversation.refinmentItems?.ambiguidades?.filter(amb => !amb.refining) || [];
                     if (remainingAmbiguidades.length > 0) {
                         // Ainda há ambiguidades - continuar com a próxima
@@ -1761,7 +2306,7 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                         messaging_product: 'whatsapp',
                         to: "+" + from,
                         type: 'text',
-                        text: { body: `✏️ *ALTERAR PEDIDO* ✏️\n\n📝 E N T E N D I   Q U E   V O C Ê   Q U E R   A L T E R A R\n\n👆 *VOCÊ PODE:*\n🔹 *ADICIONAR* novos itens\n🔹 *REMOVER* itens existentes  \n🔹 *ALTERAR* quantidades\n\n💬 *INFORME O QUE DESEJA FAZER:*` }
+                        text: { body: `✏️ *ALTERAR PEDIDO* ✏️\n\n📝 ENTENDI QUE VOCÊ QUER ALTERAR SEU PEDIDO\n\n👆 *VOCÊ PODE:*\n🔹 *ADICIONAR* novos itens\n🔹 *REMOVER* itens existentes  \n🔹 *ALTERAR* quantidades\n\n💬 *INFORME O QUE DESEJA FAZER:*` }
                     }, store.wabaEnvironments);
                     // Redirecionar para o fluxo de categorias para permitir alterações
                     // Marcar que cliente veio do pagamento para retornar depois
@@ -1781,8 +2326,8 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                     return;
                 }
                 const paymentMethod = paymentIdentification.method;
-                // Criar o pedido
-                console.log('VAI CRIAR A ORDER', currentConversation.docId, JSON.stringify(currentConversation.cartItems));
+                // Preparar dados do pedido
+                console.log('Preparando pedido...', currentConversation.docId, JSON.stringify(currentConversation.cartItems));
                 const cartItems = currentConversation.cartItems || [];
                 const subtotal = cartItems.reduce((total, item) => total + calculateItemTotalPrice(item), 0);
                 const isDelivery = currentConversation.deliveryOption === 'delivery';
@@ -1796,85 +2341,231 @@ async function handleIncomingTextMessage(currentConversation, from, message, sto
                 const customerName = currentConversation.customerName || 'Cliente não identificado';
                 // Traduzir método de pagamento para exibição
                 const paymentDisplayName = paymentMethod === 'PIX' ? 'PIX' :
-                    paymentMethod === 'CREDIT_CARD' ? 'Cartão na Entrega' :
+                    paymentMethod === 'CREDIT_CARD' ? 'Cartão de Crédito' :
                         'Dinheiro na Entrega';
-                const newOrder = await (0, ordersController_1.createOrder)({
-                    ...currentConversation,
-                    cartItems: cartItems,
-                    totalPrice: subtotal,
-                    phoneNumber: from,
-                    paymentMethod: paymentMethod,
-                    address: currentConversation?.address || {
-                        name: 'Endereço não informado',
-                        main: true, neighborhood: '', number: '', zipCode: '', street: ''
-                    },
-                }, store._id, store._id);
-                // Atualizar endereço do usuário se necessário
-                if (currentConversation.address && currentConversation.address.placeId) {
-                    const addressFromCache = addressCache[currentConversation.address.placeId];
-                    if (addressFromCache) {
-                        const updatedAddress = {
-                            name: addressFromCache.description,
-                            lat: addressFromCache.lat,
-                            lng: addressFromCache.lng,
-                            main: true,
-                            street: addressFromCache.street || '',
-                            number: addressFromCache.number || '',
-                            neighborhood: addressFromCache.neighborhood || '',
-                            city: addressFromCache.city || '',
-                            state: addressFromCache.state || '',
-                            zipCode: addressFromCache.zipCode || ''
-                        };
-                        await (0, userController_1.updateUserAddress)(from, updatedAddress);
-                        console.log('Endereço do usuário atualizado após pedido:', updatedAddress.name);
+                // ========== NOVO FLUXO: PIX OU CARTÃO DE CRÉDITO ==========
+                if (paymentMethod === 'PIX' || paymentMethod === 'CREDIT_CARD') {
+                    console.log('🔄 Método de pagamento online detectado:', paymentMethod);
+                    console.log('Criando preferência de pagamento no Mercado Pago...');
+                    try {
+                        // Criar referência única para rastrear o pedido
+                        const externalReference = `order-${currentConversation.docId}-${Date.now()}`;
+                        // Criar preferência de pagamento no Mercado Pago
+                        const preference = await (0, mercadoPagoService_1.createPaymentPreference)({
+                            items: cartItems.map(item => ({
+                                title: item.menuName || 'Item',
+                                description: item.menuName || 'Produto',
+                                quantity: item.quantity,
+                                unit_price: calculateItemTotalPrice(item) / item.quantity,
+                                currency_id: 'BRL'
+                            })),
+                            payer: {
+                                email: `cliente${from}@talkcommerce.com.br`, // Email fictício baseado no telefone
+                                name: customerName.split(' ')[0] || 'Cliente',
+                                surname: customerName.split(' ').slice(1).join(' ') || '',
+                                phone: {
+                                    area_code: from.substring(0, 2),
+                                    number: from.substring(2)
+                                },
+                                identification: currentConversation.customerDocument ? {
+                                    type: 'CPF',
+                                    number: currentConversation.customerDocument
+                                } : undefined,
+                                address: currentConversation.address ? {
+                                    zip_code: currentConversation.address.zipCode || '',
+                                    street_name: currentConversation.address.street || '',
+                                    street_number: currentConversation.address.number || '',
+                                    neighborhood: currentConversation.address.neighborhood,
+                                    city: currentConversation.address.city,
+                                    federal_unit: currentConversation.address.state
+                                } : undefined
+                            },
+                            external_reference: externalReference,
+                            notification_url: process.env.MERCADO_PAGO_NOTIFICATION_URL,
+                            payment_methods: {
+                                installments: paymentMethod === 'CREDIT_CARD' ? 12 : 1
+                            }
+                        });
+                        console.log('✅ Preferência criada:', preference.id);
+                        console.log('🔗 Link de pagamento:', preference.init_point);
+                        // Salvar pedido pendente no Firestore
+                        const pendingOrderId = await (0, pendingOrderController_1.createPendingOrder)({
+                            externalReference,
+                            mercadoPagoPreferenceId: preference.id,
+                            phoneNumber: from,
+                            storeId: store._id,
+                            customerName,
+                            customerDocument: currentConversation.customerDocument,
+                            deliveryOption: isDelivery ? 'DELIVERY' : 'COUNTER',
+                            address: currentConversation.address,
+                            items: cartItems.map(item => ({
+                                id: item.menuId,
+                                menuId: item.menuId,
+                                menuName: item.menuName || '',
+                                menuImage: item.menuImage,
+                                menuImageUrl: item.menuImageUrl,
+                                price: item.price,
+                                quantity: item.quantity,
+                                questions: item.questions?.map(q => ({
+                                    orderItemId: item.menuId,
+                                    questionId: q.questionId,
+                                    questionName: q.questionName,
+                                    questionType: q.questionType,
+                                    minAnswerRequired: q.minAnswerRequired,
+                                    maxAnswerRequired: q.maxAnswerRequired,
+                                    answers: q.answers
+                                }))
+                            })),
+                            totalPrice: subtotal,
+                            deliveryPrice,
+                            paymentMethod: paymentMethod,
+                            paymentLinkUrl: preference.init_point,
+                            createdAt: firestore_1.Timestamp.now(),
+                            status: 'pending'
+                        });
+                        console.log('✅ Pedido pendente salvo:', pendingOrderId);
+                        // Atualizar endereço do usuário se necessário
+                        if (currentConversation.address && currentConversation.address.placeId) {
+                            const addressFromCache = addressCache[currentConversation.address.placeId];
+                            if (addressFromCache) {
+                                const updatedAddress = {
+                                    name: addressFromCache.description,
+                                    lat: addressFromCache.lat,
+                                    lng: addressFromCache.lng,
+                                    main: true,
+                                    street: addressFromCache.street || '',
+                                    number: addressFromCache.number || '',
+                                    neighborhood: addressFromCache.neighborhood || '',
+                                    city: addressFromCache.city || '',
+                                    state: addressFromCache.state || '',
+                                    zipCode: addressFromCache.zipCode || ''
+                                };
+                                await (0, userController_1.updateUserAddress)(from, updatedAddress);
+                                console.log('Endereço do usuário atualizado:', updatedAddress.name);
+                            }
+                        }
+                        // Deletar conversa
+                        if (currentConversation.docId) {
+                            await (0, conversationController_1.deleteConversation)(currentConversation.docId);
+                        }
+                        // Enviar link de pagamento para o cliente
+                        const deliveryLabel = isDelivery ? 'entrega' : 'retirada na loja';
+                        const customerAddressText = isDelivery ? `📍 *ENDEREÇO DE ENTREGA:* ${deliveryAddress}` : '🏪 *RETIRADA NA LOJA*';
+                        const paymentLinkMessage = `🛒 *RESUMO DO PEDIDO* 🛒\n\n` +
+                            `👤 *Cliente:* ${customerName}\n` +
+                            `${customerAddressText}\n\n` +
+                            `📦 *Itens:*\n${itemsSummary}\n\n` +
+                            `💰 *Subtotal:* R$ ${subtotal.toFixed(2)}\n` +
+                            (isDelivery ? `🚚 *Entrega:* R$ ${deliveryPrice.toFixed(2)}\n` : '') +
+                            `💵 *TOTAL:* R$ ${totalFinal.toFixed(2)}\n\n` +
+                            `💳 *PAGAMENTO:* ${paymentDisplayName}\n\n` +
+                            `━━━━━━━━━━━━━━━━━━━━\n\n` +
+                            `🔐 *FINALIZE SEU PAGAMENTO* 🔐\n\n` +
+                            `👉 Clique no link abaixo para pagar:\n\n` +
+                            `${preference.init_point}\n\n` +
+                            `⏰ Você tem 24 horas para efetuar o pagamento.\n\n` +
+                            `✅ Após a confirmação do pagamento, seu pedido será enviado para a loja!\n\n` +
+                            `Obrigado pela preferência! 😊`;
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: paymentLinkMessage }
+                        }, store.wabaEnvironments);
+                        console.log('✅ Link de pagamento enviado para o cliente');
+                        return;
+                    }
+                    catch (error) {
+                        console.error('❌ Erro ao criar link de pagamento:', error);
+                        // Em caso de erro, notificar o cliente
+                        await (0, messagingService_1.sendMessage)({
+                            messaging_product: 'whatsapp',
+                            to: "+" + from,
+                            type: 'text',
+                            text: { body: '❌ Desculpe, ocorreu um erro ao gerar o link de pagamento. Por favor, tente novamente ou escolha outro método de pagamento.' }
+                        }, store.wabaEnvironments);
+                        return;
                     }
                 }
-                // Deletar conversa
-                if (currentConversation.docId) {
-                    await (0, conversationController_1.deleteConversation)(currentConversation.docId);
-                }
-                console.log('New order has been created', newOrder);
-                // Mensagem para a loja
-                const deliveryText = isDelivery ? `🚚 *Entrega:* R$ ${deliveryPrice.toFixed(2)}\n` : '';
-                const deliveryLabel = isDelivery ? 'entrega' : 'retirada na loja';
-                const addressText = isDelivery ? `📍 *Endereço:* ${deliveryAddress}` : '🏪 *Retirada:* Na loja';
-                const detailedStoreMessage = `🔔 *NOVO PEDIDO - AGUARDANDO CONFIRMAÇÃO* (${deliveryLabel})\n\n` +
-                    `📋 *Pedido:* #${newOrder.id}\n` +
-                    `👤 *Cliente:* ${customerName}\n` +
-                    `📱 *Telefone:* ${from}\n` +
-                    `${addressText}\n\n` +
-                    `🛒 *Itens:*\n${itemsSummary}\n\n` +
-                    `💰 *Subtotal:* R$ ${subtotal.toFixed(2)}\n` +
-                    deliveryText +
-                    `💵 *TOTAL:* R$ ${totalFinal.toFixed(2)}\n\n` +
-                    `💳 *Pagamento:* ${paymentDisplayName}\n\n` +
-                    `⚡ *AÇÃO NECESSÁRIA:* Confirme ou rejeite este pedido no sistema!`;
-                console.log('--------------------------------------**--------------------------------------', store.whatsappNumber);
-                await (0, messagingService_1.sendMessage)({
-                    messaging_product: 'whatsapp',
-                    to: store.whatsappNumber,
-                    type: 'text',
-                    text: { body: detailedStoreMessage }
-                }, store.wabaEnvironments);
-                // Mensagem para o cliente
-                const customerAddressText = isDelivery ? `📍 *ENDEREÇO DE ENTREGA:* ${deliveryAddress}` : '🏪 *RETIRADA NA LOJA*';
-                const customerMessage = `✅ *PEDIDO EFETUADO!* (${deliveryLabel})\n\n` +
-                    `📋 *Número do Pedido:* #${newOrder.id}\n\n` +
-                    `🛒 *RESUMO:*\n\n${itemsSummary}\n\n` +
-                    `💰 *SUBTOTAL:* R$ ${subtotal.toFixed(2)}\n` +
-                    deliveryText +
-                    `💵 *TOTAL:* R$ ${totalFinal.toFixed(2)}\n\n` +
-                    `💳 *PAGAMENTO:* ${paymentDisplayName}\n` +
-                    `${customerAddressText}\n\n` +
-                    `⏰ *STATUS:* Aguardando confirmação da loja\n` +
-                    `🚛 *ESTIMATIVA:* Você será notificado quando o pedido for confirmado!\n\n` +
-                    `Obrigado pela preferência! 😊`;
-                await (0, messagingService_1.sendMessage)({
-                    messaging_product: 'whatsapp',
-                    to: "+" + from,
-                    type: 'text',
-                    text: { body: customerMessage }
-                }, store.wabaEnvironments);
+                // // ========== FLUXO ATUAL: DINHEIRO/DÉBITO NA ENTREGA ==========
+                // console.log('💵 Pagamento na entrega - criando pedido imediatamente');
+                // const newOrder = await createOrder({
+                //   ...currentConversation,
+                //   cartItems: cartItems,
+                //   totalPrice: subtotal,
+                //   phoneNumber: from,
+                //   paymentMethod: paymentMethod as 'PIX' | 'CREDIT_CARD' | 'DELIVERY',
+                //   address: currentConversation?.address || {
+                //     name: 'Endereço não informado',
+                //     main: true, neighborhood: '', number: '', zipCode: '', street: ''
+                //   },
+                // }, store._id, store._id);
+                // // Atualizar endereço do usuário se necessário
+                // if (currentConversation.address && currentConversation.address.placeId) {
+                //   const addressFromCache = addressCache[currentConversation.address.placeId];
+                //   if (addressFromCache) {
+                //     const updatedAddress: Address = {
+                //       name: addressFromCache.description,
+                //       lat: addressFromCache.lat,
+                //       lng: addressFromCache.lng,
+                //       main: true,
+                //       street: addressFromCache.street || '',
+                //       number: addressFromCache.number || '',
+                //       neighborhood: addressFromCache.neighborhood || '',
+                //       city: addressFromCache.city || '',
+                //       state: addressFromCache.state || '',
+                //       zipCode: addressFromCache.zipCode || ''
+                //     };
+                //     await updateUserAddress(from, updatedAddress);
+                //     console.log('Endereço do usuário atualizado após pedido:', updatedAddress.name);
+                //   }
+                // }
+                // // Deletar conversa
+                // if (currentConversation.docId) {
+                //   await deleteConversation(currentConversation.docId)
+                // }
+                // console.log('New order has been created', newOrder);
+                // // Mensagem para a loja
+                // const deliveryText = isDelivery ? `🚚 *Entrega:* R$ ${deliveryPrice.toFixed(2)}\n` : '';
+                // const deliveryLabel = isDelivery ? 'entrega' : 'retirada na loja';
+                // const addressText = isDelivery ? `📍 *Endereço:* ${deliveryAddress}` : '🏪 *Retirada:* Na loja';
+                // const detailedStoreMessage = `🔔 *NOVO PEDIDO - AGUARDANDO CONFIRMAÇÃO* (${deliveryLabel})\n\n` +
+                //   `📋 *Pedido:* #${newOrder.id}\n` +
+                //   `👤 *Cliente:* ${customerName}\n` +
+                //   `📱 *Telefone:* ${from}\n` +
+                //   `${addressText}\n\n` +
+                //   `🛒 *Itens:*\n${itemsSummary}\n\n` +
+                //   `💰 *Subtotal:* R$ ${subtotal.toFixed(2)}\n` +
+                //   deliveryText +
+                //   `💵 *TOTAL:* R$ ${totalFinal.toFixed(2)}\n\n` +
+                //   `💳 *Pagamento:* ${paymentDisplayName}\n\n` +
+                //   `⚡ *AÇÃO NECESSÁRIA:* Confirme ou rejeite este pedido no sistema!`;
+                // console.log('--------------------------------------**--------------------------------------', store.whatsappNumber)
+                // await sendMessage({
+                //   messaging_product: 'whatsapp',
+                //   to: store.whatsappNumber,
+                //   type: 'text',
+                //   text: { body: detailedStoreMessage }
+                // }, store.wabaEnvironments);
+                // // Mensagem para o cliente
+                // const customerAddressText = isDelivery ? `📍 *ENDEREÇO DE ENTREGA:* ${deliveryAddress}` : '🏪 *RETIRADA NA LOJA*';
+                // const customerMessage = `✅ *PEDIDO EFETUADO!* (${deliveryLabel})\n\n` +
+                //   `📋 *Número do Pedido:* #${newOrder.id}\n\n` +
+                //   `🛒 *RESUMO:*\n\n${itemsSummary}\n\n` +
+                //   `💰 *SUBTOTAL:* R$ ${subtotal.toFixed(2)}\n` +
+                //   deliveryText +
+                //   `💵 *TOTAL:* R$ ${totalFinal.toFixed(2)}\n\n` +
+                //   `💳 *PAGAMENTO:* ${paymentDisplayName}\n` +
+                //   `${customerAddressText}\n\n` +
+                //   `⏰ *STATUS:* Aguardando confirmação da loja\n` +
+                //   `🚛 *ESTIMATIVA:* Você será notificado quando o pedido for confirmado!\n\n` +
+                //   `Obrigado pela preferência! 😊`;
+                // await sendMessage({
+                //   messaging_product: 'whatsapp',
+                //   to: "+" + from,
+                //   type: 'text',
+                //   text: { body: customerMessage }
+                // }, store.wabaEnvironments);
                 return;
             }
         }
